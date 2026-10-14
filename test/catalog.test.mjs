@@ -24,6 +24,8 @@ import {
 } from '../src/skill-catalog.js'
 
 const ASSET_ROOT = fileURLToPath(new URL('../assets/wps365-docs/', import.meta.url))
+/** The same directory without the URL's trailing separator, as the hint renders it. */
+const ASSET_DIR = ASSET_ROOT.replace(/\/+$/, '')
 const SKILL_PATH = fileURLToPath(new URL('../assets/wps365-docs/SKILL.md', import.meta.url))
 
 test('SKILL.md parses into the advertised name and description', () => {
@@ -108,7 +110,9 @@ test('the rank matches the bundled layer, so a user copy still wins', () => {
 
 test('buildRuntimeHint reports a present CLI', () => {
   const hint = buildRuntimeHint({ skillDir: ASSET_ROOT, cli: '/opt/wps365-cli', cliExists: true })
-  assert.ok(hint.includes(`\`{skillDir}\` = \`${ASSET_ROOT}\``))
+  assert.ok(hint.includes(`\`{skillDir}\` = \`${ASSET_DIR}\``))
+  assert.ok(hint.includes(`\`${ASSET_DIR}/scripts/\``), 'the scripts directory must have no doubled separator')
+  assert.ok(!hint.includes('//'), 'no path in the hint may contain a doubled slash')
   assert.ok(hint.includes('`/opt/wps365-cli`'))
   assert.ok(hint.includes('load_workspace_dependencies'))
   assert.ok(!hint.includes('未找到'))

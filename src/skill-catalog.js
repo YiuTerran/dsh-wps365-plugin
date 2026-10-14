@@ -142,12 +142,16 @@ export function expandHome(value, home) {
  * @returns the markdown block appended to the skill body.
  */
 export function buildRuntimeHint({ skillDir, cli, cliExists, python }) {
+  // `new URL('./assets/dir/', ...)` yields a trailing separator; strip it so the
+  // documented `{skillDir}/scripts/...` form expands without a doubled slash.
+  const dir = skillDir.replace(/[/\\]+$/, '') || skillDir
+  const scriptsDir = `${dir}/scripts/`
   const lines = [
     '',
     '## 本机资源（由 dsh-wps365-plugin 注入）',
     '',
-    `- \`{skillDir}\` = \`${skillDir}\``,
-    `- 脚本目录 = \`${skillDir}/scripts/\`（${SKILL_SCRIPTS.join('、')}）`,
+    `- \`{skillDir}\` = \`${dir}\``,
+    `- 脚本目录 = \`${scriptsDir}\`（${SKILL_SCRIPTS.join('、')}）`,
   ]
 
   if (cli === undefined) {
