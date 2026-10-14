@@ -22,7 +22,9 @@ import sys
 import urllib.request
 from collections import Counter
 
-DEFAULT_CLI = os.path.expanduser("~/.local/bin/wps365-cli")
+from _wps_cli import resolve as _resolve_cli
+
+DEFAULT_CLI = _resolve_cli()
 UA = {"User-Agent": "Mozilla/5.0"}
 
 # 导出模型里 codeBlock 的 lang 是编辑器内部数字枚举，与 blocks API 的字符串枚举

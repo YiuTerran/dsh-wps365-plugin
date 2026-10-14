@@ -17,7 +17,9 @@ import os
 import subprocess
 import sys
 
-DEFAULT_CLI = os.path.expanduser("~/.local/bin/wps365-cli")
+from _wps_cli import resolve as _resolve_cli
+
+DEFAULT_CLI = _resolve_cli()
 MAX_BLOCKS_PER_CALL = 1000  # 服务端限制：doc_children.children 单次 ≤1000
 
 

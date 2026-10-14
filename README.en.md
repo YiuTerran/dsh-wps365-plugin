@@ -29,20 +29,22 @@ It also carries the hard-won lessons of this workflow (17 hard constraints for s
 ## Before you start
 
 1. **`wps365-cli`** — not installed by this plugin, only used by it.
-   Default path `~/.local/bin/wps365-cli`. Authorize it first if you have not:
-   ```bash
+   Default path `~/.local/bin/wps365-cli` (`~\.local\bin\wps365-cli.exe` on Windows). Authorize it first if you have not:
+   ```
    wps365-cli config init
    wps365-cli auth login --device
    ```
-   If it lives elsewhere, set `cli` in the config below. **A missing or unauthenticated CLI does not break the plugin**: the skill still loads and states plainly that the CLI was not found.
+   If it lives elsewhere, set `cli` in the config below (it accepts `~` and `%NAME%` / `${NAME}` expansion, or a bare command name to look up on `PATH`). **A missing or unauthenticated CLI does not break the plugin**: the skill still loads and states plainly that the CLI was not found.
 
 2. **Python with openpyxl** — needed to read `.xlsx` formulas and to edit cloud spreadsheets. By default the agent uses the interpreter from `load_workspace_dependencies` (that environment ships openpyxl / python-docx); pin your own with `python`.
 
-3. **A `bash` tool in the session** — the model runs the scripts through it, plus file reads to page through an exported `doc.md` and `read_image` for pictures.
+3. **A shell tool in the session** — the model runs the scripts through it (`bash` on macOS and Linux, PowerShell or cmd on Windows), plus file reads to page through an exported `doc.md` and `read_image` for pictures.
 
-4. **Remove a hand-installed copy of the same skill (important)**
+4. **Windows** — every command in the skill body is a single line and its placeholders are injected by the plugin, so the same instructions run on both platforms. The injected "本机资源" block states your platform, interpreter, `wps365-cli` path and temp directory. On Windows, quote paths that contain spaces, and install the CLI with `irm https://open-docs.wpscdn.cn/cli/install.ps1 | iex`.
+
+5. **Remove a hand-installed copy of the same skill (important)**
    If you previously installed this skill by hand at `~/.dsh/skills/wps365-docs`, that copy **wins** over the bundled one (a user-directory skill outranks a bundled skill of the same name), so the plugin's version would never be used. To use the bundled one:
-   ```bash
+   ```
    rm -rf ~/.dsh/skills/wps365-docs
    ```
    Skill roots are watched, so no restart is needed.

@@ -34,7 +34,9 @@ import subprocess
 import sys
 import urllib.request
 
-DEFAULT_CLI = os.path.expanduser("~/.local/bin/wps365-cli")
+from _wps_cli import resolve as _resolve_cli
+
+DEFAULT_CLI = _resolve_cli()
 UA = {"User-Agent": "Mozilla/5.0"}
 SHEET_ROWS_PER_CALL = 100  # sheets 接口按行分块，避免单次响应过大
 

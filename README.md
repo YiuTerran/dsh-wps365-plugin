@@ -27,22 +27,25 @@
 ## 需要先准备什么
 
 1. **`wps365-cli`**（本插件不安装它，只使用它）
-   默认路径 `~/.local/bin/wps365-cli`。没配过就先授权：
-   ```bash
+   默认路径 `~/.local/bin/wps365-cli`（Windows 上是 `~\.local\bin\wps365-cli.exe`）。没配过就先授权：
+   ```
    wps365-cli config init
    wps365-cli auth login --device
    ```
-   装在别处就在配置里指定 `cli`（见下）。**CLI 缺失或未授权不会让插件失效**：技能照常可用，只是会在技能正文里明确告诉你 CLI 没找到。
+   装在别处就在配置里指定 `cli`（见下；支持 `~` 与 `%NAME%`/`${NAME}` 展开，也可以直接写裸命令名让它在 `PATH` 里找）。**CLI 缺失或未授权不会让插件失效**：技能照常可用，只是会在技能正文里明确告诉你 CLI 没找到。
 
 2. **Python（带 openpyxl）**
    读 `.xlsx` 的公式、以及云端改表格需要 openpyxl。默认让 agent 用 `load_workspace_dependencies` 返回的解释器（该环境自带 openpyxl / python-docx）；想固定一个就在配置里指定 `python`。
 
-3. **会话里有 `bash` 工具**
-   脚本由模型通过 `bash` 执行；另外还需要文件读取工具分页读导出的 `doc.md`、`read_image` 看图片。
+3. **会话里有 shell 工具**
+   脚本由模型通过 shell 执行（macOS / Linux 是 `bash`，Windows 是 PowerShell 或 `cmd`）；另外还需要文件读取工具分页读导出的 `doc.md`、`read_image` 看图片。
 
-4. **删掉手动安装的同名技能（重要）**
+4. **平台差异（Windows）**
+   技能正文里的命令一律是单行、占位符由插件注入真实值，所以两个平台都能直接照抄；注入的「本机资源」一节会告诉你本机平台、Python 解释器、`wps365-cli` 路径与临时目录。Windows 上另需注意：路径含空格时用双引号包住；CLI 安装用 `irm https://open-docs.wpscdn.cn/cli/install.ps1 | iex`。
+
+5. **删掉手动安装的同名技能（重要）**
    如果你之前把这份技能手动放在 `~/.dsh/skills/wps365-docs`，同名技能里**它优先级更高**（用户目录里的技能盖住插件自带的），插件的版本就不会被用上。想让插件版本生效：
-   ```bash
+   ```
    rm -rf ~/.dsh/skills/wps365-docs
    ```
    技能目录是被 watch 的，删完不用重启。

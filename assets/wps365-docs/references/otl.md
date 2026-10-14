@@ -14,10 +14,8 @@
 
 ## 用法（读取）
 
-```bash
-python3 {skillDir}/scripts/otl_fetch.py \
-  --file-id <智能文档 file_id> \
-  --out /tmp/otl_<短名>
+```
+{python} {skillDir}/scripts/otl_fetch.py --file-id <智能文档 file_id> --out {tmp}/otl_<短名>
 ```
 
 脚本会产出：
@@ -34,7 +32,7 @@ python3 {skillDir}/scripts/otl_fetch.py \
 - `--json <已有导出文件>`：复用一份已导出的 JSON，不重新调用 API（全流程可离线）
 - `--no-images`：只要正文，不下载附件
 - `--print-text`：把 `doc.md` 全文打到 stdout（**长文档慎用**；默认只给清单，让模型自己分页读文件）
-- `--cli <路径>`：覆盖 `wps365-cli` 路径（默认 `~/.local/bin/wps365-cli`）
+- `--cli <路径>`：覆盖 `wps365-cli` 路径（默认按平台在安装目录 `~/.local/bin` 与 `PATH` 里找，Windows 上文件名是 `wps365-cli.exe`；本机资源那节给出的 `{cli}` 就是找到的那个）
 
 然后按需看图（清单里已给出图号与路径）：
 
@@ -44,11 +42,8 @@ read_image("<out>/img/0041_TLOS5VJHACAFC.png")
 
 ## 写入文档（Markdown → 块）
 
-```bash
-python3 {skillDir}/scripts/otl_write.py \
-  --file-id <智能文档 file_id> \
-  --md /tmp/guide.md \
-  --mode replace      # append 追加到末尾（默认）/ replace 清空后写入 / prepend 插到最前
+```
+{python} {skillDir}/scripts/otl_write.py --file-id <智能文档 file_id> --md {tmp}/guide.md --mode replace      # append 追加到末尾（默认）/ replace 清空后写入 / prepend 插到最前
 ```
 
 原理：`Markdown --blocks/convert--> 块 --blocks/create--> 文档`。`blocks/convert` 返回的块与 `blocks/create` 期望的 `doc_child` 是同一个 union，可直接透传，所以**不要手拼块 JSON** —— 标题层级、表格、`**加粗**`、`` `代码` ``、列表全由转换器处理。
@@ -67,8 +62,8 @@ python3 {skillDir}/scripts/otl_write.py \
 
 分享链接如 `https://www.kdocs.cn/l/ce2ni9OvH6hj`，末段 `ce2ni9OvH6hj` 就是 `link_id`。先解析成 file_id，再走上面的脚本：
 
-```bash
-wps365-cli api get /v7/links/<link_id>/meta -o json
+```
+{cli} api get /v7/links/<link_id>/meta -o json
 ```
 
 返回关键字段：`drive_id`、`file_id`、`created_by`（分享者）、`scope`（如 `anyone`）、`status`、`role_id`。拿到 `file_id` 后**直接**用脚本导出即可 —— 实测外部用户（`company_id: 0`）分享的 `anyone` 范围文档，用本企业 delegated token 可以直接读取，**不需要"接收文件"这类前置动作**。
@@ -83,7 +78,7 @@ wps365-cli api get /v7/links/<link_id>/meta -o json
 4. **附件数是"唯一 sourceKey 数"，不等于顶层 `picture` 节点数**：实测某文档 612 个节点里顶层 picture 71 个，但唯一附件 **77** 个 —— 差额是藏在 `tableCell` 里的图和 `processon` 节点。只扫顶层会静默漏图。
 5. **表格必须专门渲染**：`table → tableRow → tableCell → paragraph`，一层都不能少；某篇 38 个表格如果只当未知类型跳过，正文信息量会掉一大半（实测 doc.md 从 87 KB 缩到 19 KB）。单元格里要用 `<br>` 表示换行、`\|` 转义管道符。
 6. `data.picture[]` 是图片注册表，与正文节点重复，**不要重复计数**。
-7. 本机 `PATH` 不含 `~/.local/bin`，脚本内部已用绝对路径，**不要**改成裸 `wps365-cli`。
+7. **`wps365-cli` 一律用本机资源那节给的绝对路径 `{cli}`**：macOS / Linux 上 `~/.local/bin` 通常不在 `PATH` 里，脚本内部会自己在安装目录与 `PATH` 里找（Windows 上文件名是 `wps365-cli.exe`）。只有那条路径都失效时才需要显式传 `--cli`。
 8. 拿到的 `.md` 是**还原稿**，不是无损的 Markdown 原文；需要精确往返（改完再 `import_json_data` 导回）时，只能动 `otl.model.json`。
 9. 图片 token 照旧要花（`read_image`），这条路省的是**管道**，不是看图成本。先读 `doc.md` 判断哪张图真的需要看。
 10. **块树查询的响应按 block_id 作键**：子块在 `data.block["doc"].children`，不是 `data.block.children`。按后者取会永远得到空列表 —— 于是 `--mode replace` 会"删除 0 个块"再插入，**静默退化成追加**，重复内容堆在文档里。

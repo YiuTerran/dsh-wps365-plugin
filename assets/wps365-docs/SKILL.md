@@ -5,7 +5,9 @@ description: 读取或写入 WPS 365 云文档。智能文档（.otl / airpage�
 
 # 读取与写入 WPS 365 云文档
 
-`{skillDir}` 是本技能的资源目录，本次加载时由插件在文末「本机资源」一节注入其**绝对路径**；执行命令前先看那一节，把 `{skillDir}` 替换成真实路径，并用那一节说明的 Python 解释器跑脚本。
+`{skillDir}`、`{python}`、`{cli}`、`{tmp}` 四个占位符都由插件在文末「本机资源」一节注入真实值（资源目录、Python 解释器、wps365-cli 路径、临时目录）；执行命令前先看那一节，把占位符替换掉再跑。
+
+命令一律写成**单行**、路径含空格用双引号包住，**不要用 `&&` 或管道串联** —— 这样 macOS / Linux 的 bash 与 Windows 的 PowerShell / cmd 都能直接执行（那一节还会告诉你本机是哪个平台）。
 
 本文件只放**必须立刻知道**的规则与命令骨架，细节按需读 `{skillDir}/references/`：
 
@@ -30,7 +32,7 @@ description: 读取或写入 WPS 365 云文档。智能文档（.otl / airpage�
 
 | 类型 | 比对方式 | 怎么做 |
 |---|---|---|
-| **`.otl`** | **块级局部比对** —— 只校验本次改动依赖的块 | ① `--list-blocks` 挑出要改的块；② `--snapshot-out /tmp/snap.json --scope-index 0,1` 存快照；③ 写回带 `--expect-snapshot /tmp/snap.json` |
+| **`.otl`** | **块级局部比对** —— 只校验本次改动依赖的块 | ① `--list-blocks` 挑出要改的块；② `--snapshot-out {tmp}/snap.json --scope-index 0,1` 存快照；③ 写回带 `--expect-snapshot {tmp}/snap.json` |
 | **`.docx` / `.xlsx` / 其他** | **整文件哈希**（`hash` sha1 + `version`，**不必下载**） | ① `file_write.py --print-state` 取基线；② 写回带 `--expect-hash … --expect-version …`；`xlsx_edit.py` 自动比对 |
 
 判定规则：声明的依赖块**被改/被删** → ❌ 放弃写入并报出是哪几个块；只有**无关块**变化 → ✅ 放行；未声明 scope → ⚠️ 全文任何变化都算冲突（`--allow-added` 可放行纯新增）；`--mode replace` → ❌ 无论是否声明 scope 都按全文比对；`--force` → 强制覆盖并打印告警。
@@ -39,33 +41,31 @@ description: 读取或写入 WPS 365 云文档。智能文档（.otl / airpage�
 
 ## 读取
 
-```bash
+```
 # 智能文档 .otl → doc.md（正文 Markdown，含表格）+ img/（全部附件）
-python3 {skillDir}/scripts/otl_fetch.py --file-id <file_id> --out /tmp/otl_<短名>
+{python} {skillDir}/scripts/otl_fetch.py --file-id <file_id> --out {tmp}/otl_<短名>
 
 # 普通文件 .docx/.xlsx/.pptx → doc.md / meta.json / original.<ext> / <sheet>.csv
-python3 {skillDir}/scripts/file_fetch.py --file-id <file_id> --out /tmp/wps_<短名> [--download] [--csv]
+{python} {skillDir}/scripts/file_fetch.py --file-id <file_id> --out {tmp}/wps_<短名> [--download] [--csv]
 ```
 
 - 长文档**别把正文打进 stdout**：默认只给清单，正文用 `read` 分页读 `<out>/doc.md`（`--print-text` 慎用）
 - 图片按清单里的图号读：`read_image("<out>/img/0041_XXXX.png")`；先读 `doc.md` 判断哪张真要看
 - **不要把导出响应原文读进上下文**：`.otl` 的 `data.content` 是 base64（某篇 5.2 万字符 ≈ 13k tokens），脚本已本地解码，只打印清单
-- 只有分享链接时：先 `wps365-cli api get /v7/links/<link_id>/meta -o json` 换出 `file_id`
-- `.xlsx` 默认走本地 openpyxl 解析（**唯一能拿到公式原文**的方式），要用本机资源那节给的 Python
+- 只有分享链接时：先 `{cli} api get /v7/links/<link_id>/meta -o json` 换出 `file_id`
+- `.xlsx` 默认走本地 openpyxl 解析（**唯一能拿到公式原文**的方式），要用本机资源那节给的 `{python}`
 
 ## 写入
 
-```bash
-# 智能文档：Markdown → blocks/convert → blocks/create
-python3 {skillDir}/scripts/otl_write.py --file-id <file_id> --md /tmp/guide.md \
-  --mode replace        # append 追加（默认）/ replace 清空后写 / prepend 插到最前
-  # 改重要文档前先加 --dry-run 看块结构
+```
+# 智能文档：Markdown → blocks/convert → blocks/create（--mode append 追加 / replace 清空后写 / prepend 插到最前；改重要文档前先加 --dry-run 看块结构）
+{python} {skillDir}/scripts/otl_write.py --file-id <file_id> --md {tmp}/guide.md --mode replace
 
-# 普通文件：原地替换（file_id 与分享链接不变，版本历史保留，可 revert）
-python3 {skillDir}/scripts/file_write.py --drive-id <盘> --file-id <file_id> --file 本地文件
+# 普通文件：原地替换（file_id 与分享链接不变，版本历史保留）
+{python} {skillDir}/scripts/file_write.py --drive-id <盘> --file-id <file_id> --file 本地文件
 
 # 云端 .xlsx 一条龙：下载 → 改 → 重算 → 传回，自动比对
-python3 {skillDir}/scripts/xlsx_edit.py --drive-id <盘> --file-id <file_id> --set "数据!B2=99"
+{python} {skillDir}/scripts/xlsx_edit.py --drive-id <盘> --file-id <file_id> --set "数据!B2=99"
 ```
 
 三条硬规矩：

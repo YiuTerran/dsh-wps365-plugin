@@ -7,7 +7,8 @@
  * the catalog entry is built at activation, and the instruction body is read
  * from disk on every load so editing `assets/wps365-docs/SKILL.md` needs no
  * reload. The Python scripts are not executed by the Host process; the skill
- * instructions tell the model to run them through the `bash` tool.
+ * instructions tell the model to run them through whatever shell the platform
+ * provides (bash on macOS and Linux, PowerShell or cmd on Windows).
  *
  * Import-free by design: no package is resolved from a registry when the bundle
  * is installed, and `Config` is a hand-written Standard Schema v1 document.
@@ -16,18 +17,18 @@
  */
 import { readFileSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { expandPath, locateCli } from './src/cli-locate.js'
 import { Config, DEFAULT_CLI } from './src/plugin-config.js'
 import {
   PROVIDER_NAME,
+  SKILL_MODULES,
   SKILL_NAME,
-  SKILL_SCRIPTS,
   buildCandidate,
   buildRuntimeHint,
-  expandHome,
   parseSkillMarkdown,
 } from './src/skill-catalog.js'
 
@@ -49,6 +50,15 @@ function requireFile(path, subject) {
   if (!stats.isFile()) throw new Error(`${PROVIDER_NAME}: ${subject} is not a file: ${path}`)
 }
 
+/** Existence probe handed to the CLI locator; never throws for a missing path. */
+function isFile(path) {
+  try {
+    return statSync(path).isFile()
+  } catch {
+    return false
+  }
+}
+
 /**
  * Resolve and validate the skill assets for this activation.
  *
@@ -61,17 +71,19 @@ function resolveAssets(config) {
 
   const skillPath = join(assetRoot, 'SKILL.md')
   requireFile(skillPath, 'SKILL.md')
-  for (const script of SKILL_SCRIPTS) requireFile(join(assetRoot, 'scripts', script), `scripts/${script}`)
+  for (const script of SKILL_MODULES) requireFile(join(assetRoot, 'scripts', script), `scripts/${script}`)
 
   const parsed = parseSkillMarkdown(readFileSync(skillPath, 'utf8'), skillPath)
   if (parsed.name !== SKILL_NAME) {
     throw new Error(`${PROVIDER_NAME}: ${skillPath} declares name "${parsed.name}", expected "${SKILL_NAME}"`)
   }
 
-  const cli = config.cli === false ? undefined : expandHome(config.cli ?? DEFAULT_CLI, homedir())
-  const python = config.python === false || config.python === undefined ? undefined : expandHome(config.python, homedir())
+  const cliValue = config.cli === false ? undefined : config.cli ?? DEFAULT_CLI
+  const python = config.python === false || config.python === undefined
+    ? undefined
+    : expandPath(config.python, { home: homedir(), env: process.env })
 
-  return { assetRoot, skillPath, parsed, cli, python }
+  return { assetRoot, skillPath, parsed, cliValue, python }
 }
 
 /**
@@ -81,18 +93,25 @@ function resolveAssets(config) {
  * @param config - normalized row config from `Config`.
  */
 export function apply(ctx, config = {}) {
-  const { assetRoot, skillPath, parsed, cli, python } = resolveAssets(config)
+  const { assetRoot, skillPath, parsed, cliValue, python } = resolveAssets(config)
 
-  let cliExists = false
-  if (cli !== undefined) {
-    try {
-      cliExists = statSync(cli).isFile()
-    } catch {
-      cliExists = false
-    }
-  }
+  // `resolved` is a real file (honouring PATHEXT on Windows); when nothing is
+  // found the attempted path is still reported so the model can see where the
+  // CLI was expected.
+  const { attempted, resolved } = cliValue === undefined
+    ? { attempted: undefined, resolved: undefined }
+    : locateCli({ cli: cliValue, platform: process.platform, env: process.env, home: homedir(), isFile })
+  const cli = resolved ?? attempted
+  const cliExists = resolved !== undefined
 
-  const runtimeHint = buildRuntimeHint({ skillDir: assetRoot, cli, cliExists, python })
+  const runtimeHint = buildRuntimeHint({
+    skillDir: assetRoot,
+    cli,
+    cliExists,
+    python,
+    platform: process.platform,
+    tmpDir: tmpdir(),
+  })
   const candidate = buildCandidate({ assetRoot, locator: skillPath, description: parsed.description })
 
   const provider = {

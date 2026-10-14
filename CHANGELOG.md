@@ -3,6 +3,17 @@
 本文件记录面向使用者的变更；每个版本的细节也同步写在 `README.md` 的「更新记录」一节。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 新增
+
+- **Windows 支持**。技能之前只在 macOS / Linux 上验证过，虽然它从不真的依赖 bash（脚本是纯 Python、每次只跑一条命令），但有几处 POSIX 假设会让 Windows 用户直接失败：
+  - **CLI 发现**：新增 `src/cli-locate.js` 与 `assets/wps365-docs/scripts/_wps_cli.py`。Windows 上可执行文件是 `wps365-cli.exe`，用裸名 `statSync('…/wps365-cli')` 会误报"未找到"。现在按 `PATHEXT` 逐个拼写探测，并且会先在安装目录、再在 `PATH` 里查找（PowerShell 安装器会把 CLI 加进 `PATH`）。
+  - **路径展开**：`~`、`~\`、`%NAME%`（Windows 拼写）、`${NAME}` / `$NAME` 都会被展开，且 `~\` 保持原生反斜杠；配置里可以写 `%USERPROFILE%\.local\bin\wps365-cli.exe`。
+  - **技能正文改为占位符 + 单行命令**：`python3 …` → `{python} …`、`/tmp/…` → `{tmp}/…`、直接调 CLI 处 → `{cli}`，由插件在加载时注入本机真实值（解释器、临时目录、CLI 路径）；命令不再使用 `\` 续行，也不再标 `bash` 围栏，因此 bash / PowerShell / cmd 都能直接粘贴执行。注入块还会说明本机平台与引号规则。
+  - 脚本侧同样平台化：`_wps_cli.py` 优先用 `shutil.which`（Windows 上自动尊重 `PATHEXT`），并支持 `WPS365_INSTALL_DIR` 覆盖安装目录。
+- 测试新增 `test/cli-locate.test.mjs`：在 macOS 上覆盖 Windows 语义（扩展名探测、`PATHEXT`、`;` 分隔的 `PATH`、`%USERPROFILE%`、原生分隔符拼接），全部用注入的假文件系统，无需真机。
+
 ## [0.1.1] - 2026-10-14
 
 ### 修复

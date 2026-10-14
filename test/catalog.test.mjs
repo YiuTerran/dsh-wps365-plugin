@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url'
 import {
   BUNDLED_SKILL_RANK,
   PROVIDER_NAME,
+  SKILL_HELPER,
+  SKILL_MODULES,
   SKILL_NAME,
   SKILL_SCRIPTS,
   buildCandidate,
@@ -66,14 +68,16 @@ test('every reference also fits the pruner budget, since it is read as a tool re
   }
 })
 
-test('every script the instructions call ships beside SKILL.md', () => {
-  for (const script of SKILL_SCRIPTS) {
+test('every module the instructions and scripts need ships beside SKILL.md', () => {
+  for (const script of SKILL_MODULES) {
     assert.ok(statSync(new URL(`../assets/wps365-docs/scripts/${script}`, import.meta.url)).isFile(), script)
   }
+  assert.ok(SKILL_MODULES.includes(SKILL_HELPER), 'the shared CLI-discovery helper must be validated too')
+  assert.ok(!SKILL_SCRIPTS.includes(SKILL_HELPER), 'the helper is not a user-facing script')
 })
 
 test('shipped scripts use the CLI path the plugin reports, not a hardcoded skill directory', () => {
-  for (const script of SKILL_SCRIPTS) {
+  for (const script of SKILL_MODULES) {
     const source = readFileSync(new URL(`../assets/wps365-docs/scripts/${script}`, import.meta.url), 'utf8')
     assert.ok(!source.includes('.dsh/skills/wps365-docs'), `${script} must not hardcode a skill install path`)
   }
@@ -109,10 +113,14 @@ test('the rank matches the bundled layer, so a user copy still wins', () => {
 })
 
 test('buildRuntimeHint reports a present CLI', () => {
-  const hint = buildRuntimeHint({ skillDir: ASSET_ROOT, cli: '/opt/wps365-cli', cliExists: true })
+  const hint = buildRuntimeHint({ skillDir: ASSET_ROOT, cli: '/opt/wps365-cli', cliExists: true, platform: 'linux' })
   assert.ok(hint.includes(`\`{skillDir}\` = \`${ASSET_DIR}\``))
   assert.ok(hint.includes(`\`${ASSET_DIR}/scripts/\``), 'the scripts directory must have no doubled separator')
-  assert.ok(!hint.includes('//'), 'no path in the hint may contain a doubled slash')
+  // URLs legitimately contain "//"; the paths this block injects must not.
+  for (const line of hint.split('\n')) {
+    if (line.includes('http')) continue
+    assert.ok(!line.includes('//'), `no injected path may contain a doubled slash: ${line}`)
+  }
   assert.ok(hint.includes('`/opt/wps365-cli`'))
   assert.ok(hint.includes('load_workspace_dependencies'))
   assert.ok(!hint.includes('未找到'))
@@ -129,6 +137,54 @@ test('buildRuntimeHint honours a disabled CLI and an explicit interpreter', () =
   assert.ok(hint.includes('不注入 CLI 路径'))
   assert.ok(hint.includes('`/opt/python3`'))
   assert.ok(!hint.includes('load_workspace_dependencies'))
+})
+
+test('buildRuntimeHint defines only the placeholders it actually resolves', () => {
+  const full = buildRuntimeHint({
+    skillDir: ASSET_ROOT,
+    cli: '/opt/wps365-cli',
+    cliExists: true,
+    python: '/opt/python3',
+    tmpDir: '/tmp/dsh-work/',
+    platform: 'linux',
+  })
+  assert.ok(full.includes('`{python}` = `/opt/python3`'))
+  assert.ok(full.includes('`{tmp}` = `/tmp/dsh-work`'), 'the temp directory keeps no trailing separator')
+  assert.ok(full.includes('`{cli}` = `/opt/wps365-cli`'))
+  const footer = full.split('\n').filter((line) => line.includes('一律替换')).join('')
+  for (const name of ['{skillDir}', '{python}', '{tmp}', '{cli}']) {
+    assert.ok(footer.includes(name), `the footer must name the placeholder it defines: ${name}`)
+  }
+
+  // Nothing resolved: the block must not promise a temp directory or a CLI path
+  // it never printed, or the model will look for a value that is not there.
+  const deferred = buildRuntimeHint({ skillDir: ASSET_ROOT, cli: undefined, cliExists: false })
+  assert.ok(deferred.includes('`{python}` = 用 `load_workspace_dependencies` 返回的解释器'))
+  assert.ok(deferred.includes('不注入 CLI 路径'))
+  assert.ok(!deferred.includes('{tmp}'), 'no temp directory may be mentioned when the caller provides none')
+  assert.ok(!deferred.includes('`{cli}`'), 'no CLI placeholder may be named when no CLI was resolved')
+
+  const noTmp = buildRuntimeHint({ skillDir: ASSET_ROOT, cli: '/opt/wps365-cli', cliExists: true })
+  assert.ok(noTmp.includes('`{cli}` = `/opt/wps365-cli`'))
+  assert.ok(!noTmp.includes('{tmp}'))
+})
+
+test('buildRuntimeHint names the installer and the shell dialect of the platform', () => {
+  const windows = buildRuntimeHint({
+    skillDir: 'C:\\Users\\u\\plugins\\assets\\wps365-docs',
+    cli: 'C:\\Users\\u\\.local\\bin\\wps365-cli.exe',
+    cliExists: false,
+    platform: 'win32',
+  })
+  assert.ok(windows.includes('install.ps1'), 'Windows users get the PowerShell installer')
+  assert.ok(windows.includes('**Windows**'))
+  assert.ok(windows.includes('PowerShell'))
+  assert.ok(!windows.includes('install.sh'))
+
+  const posix = buildRuntimeHint({ skillDir: ASSET_ROOT, cli: '/nope/wps365-cli', cliExists: false, platform: 'linux' })
+  assert.ok(posix.includes('install.sh'))
+  assert.ok(posix.includes('bash'))
+  assert.ok(!posix.includes('install.ps1'))
 })
 
 test('expandHome only rewrites a leading tilde', () => {

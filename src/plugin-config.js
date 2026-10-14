@@ -27,8 +27,15 @@
  * @module @tryao/dsh-wps365-plugin/config
  */
 
-/** CLI location used when the row's `config.cli` is omitted. */
-export const DEFAULT_CLI = '~/.local/bin/wps365-cli'
+import { defaultCliPath } from './cli-locate.js'
+
+/**
+ * CLI location used when the row's `config.cli` is omitted.
+ *
+ * Platform aware: Windows appends `.exe`, and discovery additionally searches
+ * `PATH` for both the default and a bare configured name (see `cli-locate.js`).
+ */
+export const DEFAULT_CLI = defaultCliPath(process.platform)
 
 /** Human-readable JSON Schema for tooling that renders a plugin row's config. */
 export const CONFIG_JSON_SCHEMA = {
@@ -45,7 +52,7 @@ export const CONFIG_JSON_SCHEMA = {
     cli: {
       anyOf: [{ type: 'string', minLength: 1 }, { const: false }],
       description:
-        `Absolute or ~-relative path of the wps365-cli executable. Defaults to ${DEFAULT_CLI}. Pass false to omit the CLI line from the injected skill resources.`,
+        `Path of the wps365-cli executable, or a bare command name to look up on PATH. Defaults to ${DEFAULT_CLI}, then falls back to PATH. ~ and %NAME% / \${NAME} are expanded. Pass false to omit the CLI line from the injected skill resources.`,
     },
     python: {
       anyOf: [{ type: 'string', minLength: 1 }, { const: false }],

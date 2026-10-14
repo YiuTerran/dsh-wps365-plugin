@@ -15,19 +15,17 @@
 
 智能文档有块级结构，别人改了文档末尾跟你无关，不该挡住你改开头。**所以要显式声明依赖范围**：
 
-```bash
+```
 # 1. 先列块，挑出你要改的块
-python3 {skillDir}/scripts/otl_write.py --file-id <id> --list-blocks
+{python} {skillDir}/scripts/otl_write.py --file-id <id> --list-blocks
 #    0  JAhWraLloiMK  [heading] 概述
 #    1  OjRTXcRPYJQe  [paragraph] 本文说明 AI Agent 如何…
 
 # 2. 存快照，并声明本次依赖哪几个块（--scope-index 用索引更省事）
-python3 {skillDir}/scripts/otl_write.py --file-id <id> \
-  --snapshot-out /tmp/snap.json --scope-index 0,1
+{python} {skillDir}/scripts/otl_write.py --file-id <id> --snapshot-out {tmp}/snap.json --scope-index 0,1
 
 # 3. 写回时带上快照 —— 依赖块被改过就放弃写入
-python3 {skillDir}/scripts/otl_write.py --file-id <id> --md 改后.md \
-  --mode replace --expect-snapshot /tmp/snap.json
+{python} {skillDir}/scripts/otl_write.py --file-id <id> --md 改后.md --mode replace --expect-snapshot {tmp}/snap.json
 ```
 
 判定规则：
@@ -77,14 +75,13 @@ WPS 有**两条互不相干的通道**，行为完全不同：
 
 这类文件是整文件替换，改任何一处都会改变整个文件的字节，所以「整文件哈希变了」就等价于「有人动过」。而且**不必下载** —— `drive file get` 的元数据里直接带 `hash`（sha1，实测与本地算出的完全一致）和 `version`：
 
-```bash
+```
 # 取基线（file_fetch.py 也会把它写进 meta.json）
-python3 {skillDir}/scripts/file_write.py --drive-id <盘> --file-id <id> --print-state
+{python} {skillDir}/scripts/file_write.py --drive-id <盘> --file-id <id> --print-state
 # version=2  hash=7d8d8e9f…  size=12169  最后修改=某人
 
 # 写回时带基线；云端哈希/版本对不上就放弃
-python3 {skillDir}/scripts/file_write.py --drive-id <盘> --file-id <id> --file x.docx \
-  --expect-hash 7d8d8e9f… --expect-version 2 --backup-dir /tmp/bk
+{python} {skillDir}/scripts/file_write.py --drive-id <盘> --file-id <id> --file x.docx --expect-hash 7d8d8e9f… --expect-version 2 --backup-dir {tmp}/bk
 ```
 
 `xlsx_edit.py` **自动完成比对**：它自己下载，天然知道基线，传回前会自动检查（输出第 ④ 步）。

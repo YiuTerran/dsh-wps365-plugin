@@ -10,9 +10,8 @@
 
 ## 读取
 
-```bash
-python3 {skillDir}/scripts/file_fetch.py \
-  --file-id <file_id> --out /tmp/wps_<短名> [--download] [--csv] [--link <分享链接>]
+```
+{python} {skillDir}/scripts/file_fetch.py --file-id <file_id> --out {tmp}/wps_<短名> [--download] [--csv] [--link <分享链接>]
 ```
 
 | 产物 | 内容 |
@@ -26,16 +25,15 @@ python3 {skillDir}/scripts/file_fetch.py \
 
 ## 写入
 
-```bash
+```
 # 原地替换：file_id 与分享链接不变，版本历史保留（但 API 回滚不了，见下面第 9 条）
-python3 {skillDir}/scripts/file_write.py --drive-id <盘> --file-id <file_id> \
-  --file 本地文件 [--backup-dir /tmp/bk]
+{python} {skillDir}/scripts/file_write.py --drive-id <盘> --file-id <file_id> --file 本地文件 [--backup-dir {tmp}/bk]
 
 # 新建文件（--md 先生成 docx：标题/无序有序列表/表格/加粗可靠；引用、行内代码、链接会降级，见下）
-python3 {skillDir}/scripts/file_write.py --drive-id <盘> --parent-id 0 --md 内容.md --name 新文档.docx
+{python} {skillDir}/scripts/file_write.py --drive-id <盘> --parent-id 0 --md 内容.md --name 新文档.docx
 
 # 只做连通性测试：只申请上传，不 PUT 不提交，**不产生任何文件**
-python3 {skillDir}/scripts/file_write.py --drive-id <盘> --file-id <file_id> --file x.docx --dry-run
+{python} {skillDir}/scripts/file_write.py --drive-id <盘> --file-id <file_id> --file x.docx --dry-run
 ```
 
 上传是**字节透传**，`.docx` / `.xlsx` / `.pptx` 通用（实测覆盖前两种）。
@@ -44,10 +42,9 @@ python3 {skillDir}/scripts/file_write.py --drive-id <盘> --file-id <file_id> --
 
 `xlsx_edit.py` 把"下载 → 改 → 重算 → 传回"串成一步，并**自动补上 openpyxl 会抹掉的公式缓存值**：
 
-```bash
+```
 # 直接改单元格（值以 = 开头即公式，注意是两个等号）
-python3 {skillDir}/scripts/xlsx_edit.py --drive-id <盘> --file-id <file_id> \
-  --set "数据!B2=99" --set "数据!D2==B2*C2" --backup-dir /tmp/bk
+{python} {skillDir}/scripts/xlsx_edit.py --drive-id <盘> --file-id <file_id> --set "数据!B2=99" --set "数据!D2==B2*C2" --backup-dir {tmp}/bk
 
 # 复杂改动用编辑脚本：以 wb / sheet() 为上下文执行，可给 changes 列表报改动
 cat > edit.py <<'PY'
@@ -56,11 +53,10 @@ ws["A14"] = "脚本写入"
 wb.create_sheet("新表")["A1"] = "内容"
 changes = ["数据!A14 = 脚本写入"]
 PY
-python3 {skillDir}/scripts/xlsx_edit.py --drive-id <盘> --file-id <file_id> --py edit.py
+{python} {skillDir}/scripts/xlsx_edit.py --drive-id <盘> --file-id <file_id> --py edit.py
 
 # 只改本地不传回
-python3 {skillDir}/scripts/xlsx_edit.py --drive-id <盘> --file-id <file_id> \
-  --set "数据!A1=x" --dry-run
+{python} {skillDir}/scripts/xlsx_edit.py --drive-id <盘> --file-id <file_id> --set "数据!A1=x" --dry-run
 ```
 
 `--set` 按内容推断类型（`123`→数字、`true`→布尔、`=…`→公式、其余字符串）。重算依赖 LibreOffice kit，脚本会自动探测路径，也可用 `--lo-cli` / `--node` 或环境变量 `DSH_LIBREOFFICE_CLI` / `DSH_NODE` 指定；**找不到时会跳过并明确告警**，不会静默丢缓存值。
@@ -96,8 +92,8 @@ python3 {skillDir}/scripts/xlsx_edit.py --drive-id <盘> --file-id <file_id> \
 
 ## 本地编辑的两个坑
 
-1. **`openpyxl` 保存会丢掉公式的缓存值**（`data_only=True` 读出 `None`，已实测）。Excel/WPS 打开会重算，但下游若按缓存值读就会拿到空。改完 `.xlsx` 建议用 LibreOffice kit 的 `recalculate` 重算一遍再上传（实测能重新写入缓存值）：
-   ```bash
+1. **`openpyxl` 保存会丢掉公式的缓存值**（`data_only=True` 读出 `None`，已实测）。Excel/WPS 打开会重算，但下游若按缓存值读就会拿到空。改完 `.xlsx` 建议用 LibreOffice kit 的 `recalculate` 重算一遍再上传（实测能重新写入缓存值）。`xlsx_edit.py` 会自己探测 kit（依次是 `--node` / `--lo-cli` 参数、`DSH_NODE` / `DSH_LIBREOFFICE_CLI` 环境变量、已知路径、`PATH` 里的 `node`），手工跑时用：
+   ```
    node <libreofficeKit.node> <libreofficeKit.cli> recalculate --input 改完.xlsx --output 重算.xlsx
    ```
    再分别用 `data_only=False` / `True` 复读校验公式与计算值。

@@ -7,6 +7,7 @@
  *
  * @module @tryao/dsh-wps365-plugin/skill-catalog
  */
+import { expandPath } from './cli-locate.js'
 
 /** Skill name as it appears in the catalog and in `skill` tool calls. */
 export const SKILL_NAME = 'wps365-docs'
@@ -30,6 +31,16 @@ export const SKILL_SCRIPTS = [
   'file_write.py',
   'xlsx_edit.py',
 ]
+
+/**
+ * Helper module the scripts import for CLI discovery. It is not a user-facing
+ * script, so it stays out of `SKILL_SCRIPTS`, but it must ship or every script
+ * fails at import time.
+ */
+export const SKILL_HELPER = '_wps_cli.py'
+
+/** Every file that must exist under `scripts/` for activation to succeed. */
+export const SKILL_MODULES = [...SKILL_SCRIPTS, SKILL_HELPER]
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u
 
@@ -114,38 +125,45 @@ export function buildCandidate({ assetRoot, locator, description }) {
 /**
  * Expand a leading `~` in a configured path without touching the filesystem.
  *
+ * Thin wrapper over `expandPath` kept for the two-argument call shape; the full
+ * form also understands `~\`, `%NAME%` and `${NAME}`.
+ *
  * @param value - configured or default path.
  * @param home - the current user's home directory.
  * @returns the expanded path.
  */
 export function expandHome(value, home) {
-  if (value === '~') return home
-  if (value.startsWith('~/')) return `${home}/${value.slice(2)}`
-  return value
+  return expandPath(value, { home })
 }
 
 /**
  * Render the environment block appended to the skill body at load time.
  *
- * The instruction body is written against a `{skillDir}` placeholder because
- * the plugin directory differs per installation (profile bundle, workspace
- * bundle, or a packaged application). Resolving that placeholder here keeps the
- * document itself location-independent while still giving the model absolute
- * paths it can paste into a shell call.
+ * The instruction body is written against `{skillDir}`, `{python}` and `{tmp}`
+ * placeholders because each of them differs per installation and per platform
+ * (macOS, Linux, Windows). Resolving them here keeps one document valid
+ * everywhere while still giving the model absolute paths it can paste into a
+ * shell call.
  *
  * @param options - resolved directories and binaries.
  * @param options.skillDir - absolute skill asset directory.
- * @param options.cli - absolute wps365-cli path, or undefined when disabled.
+ * @param options.cli - wps365-cli path (or attempted path), or undefined when disabled.
  * @param options.cliExists - whether that executable exists on disk.
  * @param options.python - absolute interpreter path, or undefined to defer to
  *   `load_workspace_dependencies`.
+ * @param options.platform - `process.platform` value; drives the shell wording.
+ * @param options.tmpDir - this machine's temporary directory, when known.
  * @returns the markdown block appended to the skill body.
  */
-export function buildRuntimeHint({ skillDir, cli, cliExists, python }) {
+export function buildRuntimeHint({ skillDir, cli, cliExists, python, platform = process.platform, tmpDir }) {
   // `new URL('./assets/dir/', ...)` yields a trailing separator; strip it so the
   // documented `{skillDir}/scripts/...` form expands without a doubled slash.
   const dir = skillDir.replace(/[/\\]+$/, '') || skillDir
-  const scriptsDir = `${dir}/scripts/`
+  const windows = platform === 'win32'
+  // Follow the separator the injected directory already uses, so a Windows path
+  // does not come back as `C:\…\wps365-docs/scripts/`.
+  const separator = dir.includes('\\') ? '\\' : dir.includes('/') ? '/' : windows ? '\\' : '/'
+  const scriptsDir = `${dir}${separator}scripts${separator}`
   const lines = [
     '',
     '## 本机资源（由 @tryao/dsh-wps365-plugin 注入）',
@@ -154,25 +172,47 @@ export function buildRuntimeHint({ skillDir, cli, cliExists, python }) {
     `- 脚本目录 = \`${scriptsDir}\`（${SKILL_SCRIPTS.join('、')}）`,
   ]
 
-  if (cli === undefined) {
-    lines.push('- `wps365-cli`：本插件配置为不注入 CLI 路径，按文档里的默认值使用。')
-  } else if (cliExists) {
-    lines.push(`- \`wps365-cli\` = \`${cli}\`（脚本默认值可能指向别处，必要时显式传 \`--cli ${cli}\`）`)
-  } else {
-    lines.push(
-      `- ⚠️ \`wps365-cli\` 未找到：\`${cli}\`。先安装并授权（\`wps365-cli config init\`、\`wps365-cli auth login --device\`），` +
-        '再把 `--cli <实际路径>` 传给脚本；否则所有读写都会失败。',
-    )
-  }
-
   if (python === undefined) {
     lines.push(
-      '- Python：用 `load_workspace_dependencies` 返回的 python 跑脚本（`file_fetch.py` / `xlsx_edit.py` 需要 openpyxl，系统 python3 通常没有）。',
+      '- `{python}` = 用 `load_workspace_dependencies` 返回的解释器跑脚本（`file_fetch.py` / `xlsx_edit.py` 需要 openpyxl，系统 python3 通常没有）。',
     )
   } else {
-    lines.push(`- Python = \`${python}\`（已带 openpyxl / python-docx，直接用这个解释器跑脚本）`)
+    lines.push(`- \`{python}\` = \`${python}\`（已带 openpyxl / python-docx，直接用这个解释器跑脚本）`)
   }
 
-  lines.push('', '本文档命令里的 `{skillDir}` 一律替换成上面的绝对路径后再执行。', '')
+  if (typeof tmpDir === 'string' && tmpDir.length > 0) {
+    lines.push(`- \`{tmp}\` = \`${tmpDir.replace(/[/\\]+$/, '') || tmpDir}\`（脚本的 \`--out\` / \`--backup-dir\` 放这里）`)
+  }
+
+  if (cli === undefined) {
+    lines.push('- `wps365-cli`：本插件配置为不注入 CLI 路径，按文档里的默认值使用（脚本会自己在 PATH 与安装目录里找）。')
+  } else if (cliExists) {
+    lines.push(`- \`{cli}\` = \`${cli}\`（脚本会自己找；要显式指定就传 \`--cli ${cli}\`）`)
+  } else {
+    const installer = windows
+      ? '`irm https://open-docs.wpscdn.cn/cli/install.ps1 | iex`'
+      : '`curl -fsSL https://open-docs.wpscdn.cn/cli/install.sh | bash`'
+    lines.push(
+      `- ⚠️ \`wps365-cli\` 未找到：\`${cli}\`。先安装并授权（${installer}，再 \`wps365-cli config init\`、` +
+        '`wps365-cli auth login --device`），再把 `--cli <实际路径>` 传给脚本；否则所有读写都会失败。',
+    )
+  }
+
+  lines.push(
+    windows
+      ? '- 本机是 **Windows**：命令在 PowerShell 或 cmd 里执行；路径含空格时用双引号包住，不要用 `&&` / 管道串联命令。'
+      : `- 本机是 **${platform}**：命令在 bash 里执行即可；路径含空格时用双引号包住。`,
+  )
+
+  // Name only the placeholders this block actually defines: a command that
+  // mentions `{tmp}` or `{cli}` must be able to find its value above.
+  const defined = ['`{skillDir}`', '`{python}`']
+  if (typeof tmpDir === 'string' && tmpDir.length > 0) defined.push('`{tmp}`')
+  if (cli !== undefined && cliExists) defined.push('`{cli}`')
+  lines.push(
+    '',
+    `本文档命令里的 ${defined.join('、')} 一律替换成上面的值后再执行；命令都是单行，可直接粘贴。`,
+    '',
+  )
   return lines.join('\n')
 }

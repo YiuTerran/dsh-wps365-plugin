@@ -41,7 +41,9 @@ import subprocess
 import sys
 import urllib.request
 
-DEFAULT_CLI = os.path.expanduser("~/.local/bin/wps365-cli")
+from _wps_cli import resolve as _resolve_cli
+
+DEFAULT_CLI = _resolve_cli()
 UA = {"User-Agent": "Mozilla/5.0"}
 
 
