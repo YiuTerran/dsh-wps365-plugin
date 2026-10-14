@@ -1,0 +1,21 @@
+# dsh-wps365-plugin bundle patch.
+#
+# ONE insert over the profile root: the skill row. `./index.js` is anchored
+# beside this patch file, so the row resolves the entry shipped in the same
+# package wherever the bundle is installed from.
+#
+# The row carries no `config`; every field has a usable default. To point the
+# skill at a different wps365-cli or interpreter, override the row by id in the
+# profile's own cordis.patch.yml:
+#
+#   - id: skill-wps365-docs
+#     name: './index.js'
+#     config:
+#       cli: /opt/wps365/bin/wps365-cli
+#       python: /usr/local/bin/python3
+#
+# A patch replaces the targeted row's whole `config`, so restate every field the
+# row needs.
+- insert:
+    - id: skill-wps365-docs
+      name: './index.js'

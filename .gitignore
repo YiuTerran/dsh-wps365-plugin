@@ -1,0 +1,8 @@
+# Local scratch used while designing the plugin (DSH checkout inspection).
+.research/
+# Node / package manager noise
+node_modules/
+.pnpm-store/
+*.log
+# macOS
+.DS_Store

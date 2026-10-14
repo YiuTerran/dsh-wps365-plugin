@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "WPS 365 云文档（wps365-docs）",
+    "description": "随包提供 wps365-docs 技能：读取与写入 WPS 365 智能文档（.otl）与普通文件（.docx/.xlsx/.pptx），写入前做并发比对。"
+  }
+}

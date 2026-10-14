@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "WPS 365 Cloud Documents (wps365-docs)",
+    "description": "Ships the wps365-docs skill: read and write WPS 365 smart documents (.otl) and office files (.docx/.xlsx/.pptx) with conflict-checked writes."
+  }
+}
