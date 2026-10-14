@@ -15,6 +15,7 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { Config, apply, inject, name } from '../index.js'
+import { CONFIG_JSON_SCHEMA } from '../src/plugin-config.js'
 import { PROVIDER_NAME, SKILL_NAME } from '../src/skill-catalog.js'
 
 const ASSET_ROOT = fileURLToPath(new URL('../assets/wps365-docs/', import.meta.url))
@@ -159,6 +160,9 @@ test('Config normalizes, defaults, and rejects bad input', () => {
   assert.match(validate({ assetRoot: ' x ' }).issues[0].message, /whitespace/)
   assert.match(validate('nope').issues[0].message, /must be an object/)
 
-  assert.equal(Config.toJSON().additionalProperties, false)
-  assert.deepEqual(Object.keys(Config.toJSON().properties).sort(), ['assetRoot', 'cli', 'python'])
+  assert.equal(CONFIG_JSON_SCHEMA.additionalProperties, false)
+  assert.deepEqual(Object.keys(CONFIG_JSON_SCHEMA.properties).sort(), ['assetRoot', 'cli', 'python'])
+  // The schema must stay off the Config object itself: a toJSON() member makes
+  // dsh-settings treat Config as a native schema and crash the welcome RPC.
+  assert.equal('toJSON' in Config, false)
 })

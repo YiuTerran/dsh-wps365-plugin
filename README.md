@@ -133,6 +133,11 @@ locale/{en,zh}.json  icon.svg  test/
 
 技能正文里的路径统一写成 `{skillDir}` 占位符，加载时由插件注入真实绝对路径，所以同一份资源放在 profile bundle、工作区 bundle 或打包应用里都能用。包被标成 `"private": true` 防止误发 npm，要发布时删掉并补 `repository` / `publishConfig`。
 
+## 更新记录
+
+- **0.1.1** — 修复一个**会导致 Harness 打不开**的严重问题。0.1.0 的手写 Config 上带了一个 `toJSON()` 方法，而 DSH 的 settings 服务用 `"toJSON" in schema` 这个鸭子类型挑选要渲染的 schema，选中后紧接着读 `schema.meta.volatile` —— 手写对象没有 `meta`，于是抛 `TypeError`，`settings/describe` 失败，桌面端 welcome RPC 报 `Web RPC failed`，窗口起不来。删掉 `toJSON()` 即可（`~standard.validate` 不受影响，配置校验照常），并加了回归测试锁住这个形状。
+- **0.1.0** — 首个版本：把 `wps365-docs` 技能打包成 DSH bundle。
+
 ## 许可
 
 MIT

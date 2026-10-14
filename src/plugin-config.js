@@ -19,6 +19,11 @@
  * rejected deliberately: it would couple the bundle to another package's
  * internals for a display-only benefit.
  *
+ * ⚠️ The one field that must never appear on the exported `Config` is
+ * `toJSON()`: DSH's settings service duck-types on it alone and then dereferences
+ * Schemastery fields, which crashes the Desktop welcome RPC and makes the whole
+ * application unopenable. Details at the `Config` export below.
+ *
  * @module dsh-wps365-plugin/config
  */
 
@@ -117,8 +122,31 @@ export function normalizeConfig(raw) {
 /**
  * Standard Schema v1 wrapper consumed by the Cordis loader.
  *
- * `toJSON()` returns a plain JSON Schema for surfaces that render a row's
- * config schema; it is not part of the Standard Schema contract.
+ * ⚠️ DO NOT ADD `toJSON()` (or any other Schemastery field such as `meta`,
+ * `type`, or the `Symbol.for('schemastery')` marker) to this object. It must
+ * stay an object that *only* implements `~standard`.
+ *
+ * Why: DSH's settings service picks the schemas it renders with a duck-type
+ * test that is satisfied by `toJSON` alone —
+ *
+ *     schema(entry) {
+ *       const schema = entry.fiber?.runtime?.Config
+ *       return schema !== void 0 && 'toJSON' in schema ? schema : void 0
+ *     }
+ *
+ * (`@deepseek-ai/dsh-settings`, lib/index.js). A `toJSON()`-carrying object is
+ * therefore handed to `volatileForm()`, whose first statement reads
+ * `schema.meta.volatile`. This object has no `meta`, so the read throws
+ * `TypeError: Cannot read properties of undefined (reading 'volatile')`,
+ * `settings/describe` fails, and the Desktop welcome window dies with
+ * "desktop welcome: Web RPC failed" — the whole application becomes
+ * unopenable. That regression shipped in 0.1.0 and was fixed in 0.1.1 by
+ * deleting `toJSON()`; `test/config-shape.test.mjs` guards it.
+ *
+ * Without the duck-typed field the settings service skips this entry
+ * (`schema(entry)` returns undefined) and the Cordis loader still validates the
+ * row's `config` through `~standard.validate` below. `CONFIG_JSON_SCHEMA` stays
+ * exported separately for humans and non-Schemastery tooling.
  */
 export const Config = {
   '~standard': {
@@ -137,9 +165,5 @@ export const Config = {
         return { issues: [path === undefined ? { message } : { message, path }] }
       }
     },
-  },
-  /** @returns the JSON Schema describing this plugin's config. */
-  toJSON() {
-    return CONFIG_JSON_SCHEMA
   },
 }

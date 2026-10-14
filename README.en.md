@@ -133,6 +133,11 @@ locale/{en,zh}.json  icon.svg  test/
 
 Asset paths are written as a `{skillDir}` placeholder and resolved into real absolute paths at load time, so the same assets work from a profile bundle, a workspace bundle, or a packaged app. The package is marked `"private": true` to prevent accidental publishing; drop it and add `repository` / `publishConfig` to publish.
 
+## Changelog
+
+- **0.1.1** — Fixes a severe bug that made Harness **unable to open**. The hand-written Config in 0.1.0 carried a `toJSON()` method, and DSH's settings service selects the schemas it renders with a `"toJSON" in schema` duck-type test, then immediately reads `schema.meta.volatile`. A hand-written object has no `meta`, so the read threw a `TypeError`, `settings/describe` failed, and the desktop welcome RPC reported `Web RPC failed`. Deleting `toJSON()` fixes it (`~standard.validate` is unaffected, so config validation still runs), and a regression test now pins that shape.
+- **0.1.0** — First release: packages the `wps365-docs` skill as a DSH bundle.
+
 ## License
 
 MIT
