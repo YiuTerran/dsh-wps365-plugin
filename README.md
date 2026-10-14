@@ -1,53 +1,59 @@
 # dsh-wps365-plugin
 
-把 **`wps365-docs` 技能**打包成 DeepSeek Harness（DSH）插件的 bundle：装进 profile 后，任何会话都能加载这个技能，读取与写入 WPS 365 云文档。
+给你的 DSH 装上 **WPS 365 云文档**能力。
 
-- **技能**：`wps365-docs`（智能文档 `.otl` / 普通文件 `.docx` `.xlsx` `.pptx` 的读、写、改、并发比对）
-- **随包资源**：`SKILL.md` + 3 份按需读取的 `references/` + 5 个 Python 脚本
-- **零依赖**：`package.json` 里没有 `dependencies` / `peerDependencies`，安装时不解析任何 npm 包
-- **Host 侧只注册技能**：脚本不被插件执行，由模型按技能说明通过 `bash` 工具调用
+装好之后不用再手动导出、复制粘贴：你可以直接让 agent 读一篇 WPS 智能文档、把内容写进云文档、改云端表格里的某个单元格，它都能真的去读写你的 WPS 365 文档 —— 包括别人通过分享链接给你的文档。
+
+> 插件本体只提供技能（`wps365-docs`）与配套脚本，**不含**任何 WPS 账号信息；所有云文档操作都由你自己安装的 `wps365-cli` 完成。
 
 ---
 
-## 组成
+## 它能帮你做什么
 
-```
-.
-├── index.js                      # Host 插件：向 ctx.skills 注册 wps365-docs
-├── src/
-│   ├── plugin-config.js          # 手写 Standard Schema v1 配置（零依赖）
-│   └── skill-catalog.js          # 纯函数：解析 frontmatter、构造 catalog entry、渲染资源块
-├── cordis.patch.yml              # bundle patch：插入 skill-wps365-docs 行
-├── assets/wps365-docs/
-│   ├── SKILL.md                  # 常驻正文（约 3.4k 字符，远低于 8192 的修剪阈值）
-│   ├── references/
-│   │   ├── otl.md                # 智能文档：读取/写入/分享链接/17 条硬约束
-│   │   ├── office-files.md       # 普通文件：下载→本地改→传回、接口写入、本地编辑坑
-│   │   └── concurrency.md        # 写入前并发比对、块级/整文件哈希、实测语义
-│   └── scripts/                  # otl_fetch.py / otl_write.py / file_fetch.py / file_write.py / xlsx_edit.py
-├── locale/{en,zh}.json           # 插件卡片标题与描述
-├── icon.svg
-└── test/                         # 离线测试（node --test，无需联网）
-```
+| 你可以这样说 | 它会做什么 |
+|---|---|
+| "把这篇 WPS 文档总结一下" / "这篇智能文档里有哪些待办" | 读智能文档（`.otl`）：还原成 Markdown（标题、列表、**表格**、引用、加粗、代码块），长文自动分页读，不把全文塞进上下文 |
+| "文档里的那张架构图给我看看" | 下载文档里**所有**内嵌图片到本地（含表格单元格里的图、processon 图），只按需把你要看的那几张读进上下文 |
+| "把这份 Markdown 写进这篇智能文档" | 写入智能文档：整篇替换 / 追加到末尾 / 插到最前；写入前可先预演块结构 |
+| "把文档里第二段改掉" | 逐段原地编辑智能文档（块级 API），不用整篇重写 |
+| "读一下这个 .docx / .xlsx / .pptx" | 下载原件到本地，并抽出正文 Markdown、表格、**公式原文**、每个工作表一份 CSV |
+| "把附件里的这个表格改一下再传回去" | 本地编辑后整文件传回：`file_id` 与分享链接不变，版本历史保留、可回滚；也能新建文件 |
+| "把云端表格里 B2 改成 99，D2 加上公式" | 云端 `.xlsx` 一条龙：下载 → 改 → 重算公式缓存值 → 传回，一条命令完成 |
+| "这是别人分享给我的链接，帮我读一下" | 从 kdocs / plus 分享链接解析出文档并正常读取（无需"接收文件"这类前置动作） |
+| "帮我把这份文档改一下" | **写入前先比对云端是否已被他人修改**；发现冲突就停下、告诉你冲突在哪，绝不静默覆盖 |
 
-### 为什么把技能拆成 `SKILL.md` + `references/`
+它内置了这套流程里踩过的坑（17 条智能文档硬约束、普通文件接口细节、并发写入的实测语义），所以遇到"表格整块消失""公式变成空值""代码块语言被降级""写完下载还是旧内容"这类问题，它知道该怎么绕。
 
-标准 preset 的 `tool-result-pruner`（`thresholdChars: 8192`）会把超过 8192 字符的工具结果**从中间剪掉**，只留头 4096 + 尾 1024。原始单文件 `SKILL.md` 约 24 KB，一旦被加载就会丢掉大半内容。所以这里按 DSH 自带技能的惯例拆开：
+## 需要先准备什么
 
-- `SKILL.md` 只留**必须立刻知道**的东西：两类文档的两条路线、写入前并发比对（硬性规则）、读写命令骨架、三条硬规矩；
-- 细节（17 条硬约束、实测数据、接口细节）放进 `references/`，由模型按需 `read` 单个文件，每个文件都在阈值内。
+1. **`wps365-cli`**（本插件不安装它，只使用它）
+   默认路径 `~/.local/bin/wps365-cli`。没配过就先授权：
+   ```bash
+   wps365-cli config init
+   wps365-cli auth login --device
+   ```
+   装在别处就在配置里指定 `cli`（见下）。**CLI 缺失或未授权不会让插件失效**：技能照常可用，只是会在技能正文里明确告诉你 CLI 没找到。
 
-正文里的路径统一写作 `{skillDir}` 占位符：插件在加载技能时把真实绝对路径作为一个「本机资源」区块**追加**到技能正文末尾，因此文档本身与安装位置无关（profile bundle、工作区 bundle、打包应用都能用）。
+2. **Python（带 openpyxl）**
+   读 `.xlsx` 的公式、以及云端改表格需要 openpyxl。默认让 agent 用 `load_workspace_dependencies` 返回的解释器（该环境自带 openpyxl / python-docx）；想固定一个就在配置里指定 `python`。
+
+3. **会话里有 `bash` 工具**
+   脚本由模型通过 `bash` 执行；另外还需要文件读取工具分页读导出的 `doc.md`、`read_image` 看图片。
+
+4. **删掉手动安装的同名技能（重要）**
+   如果你之前把这份技能手动放在 `~/.dsh/skills/wps365-docs`，同名技能里**它优先级更高**（用户目录里的技能盖住插件自带的），插件的版本就不会被用上。想让插件版本生效：
+   ```bash
+   rm -rf ~/.dsh/skills/wps365-docs
+   ```
+   技能目录是被 watch 的，删完不用重启。
 
 ## 安装
 
-推荐用 `plugin_manager`（在 DSH 里让 agent 调用）：
+在 DSH 里让 agent 调用：
 
 ```
 plugin_manager { action: "install_bundle", target: "/绝对路径/dsh-wps365-plugin" }
 ```
-
-它会完成包安装与 bundle 选择，**不要**手改 profile 的 `package.json` / `cordis.patch.yml`，也不要在 profile 目录里跑 pnpm。
 
 命令行等价写法：
 
@@ -55,23 +61,25 @@ plugin_manager { action: "install_bundle", target: "/绝对路径/dsh-wps365-plu
 dsh plugin --profile desktop add /绝对路径/dsh-wps365-plugin
 ```
 
-安装后重启（或让 HMR 生效）即可在技能目录里看到 `wps365-docs`。卸载：
+装好后新开一个会话，问一句"读一下这篇 WPS 文档 `<file_id>`"。确认生效的方法：加载进来的技能正文**末尾**会附带一段「本机资源（由 dsh-wps365-plugin 注入）」，里面给出脚本目录、`wps365-cli` 路径和该用哪个 Python。
+
+卸载：
 
 ```
 plugin_manager { action: "remove_bundle", target: "dsh-wps365-plugin" }
 ```
 
-## 配置
+## 配置（可选）
 
-行 id 是 `skill-wps365-docs`，三个字段都有默认值，**不写 `config` 也能用**：
+插件行的 id 是 `skill-wps365-docs`，三个字段都有默认值，**不配也能用**：
 
-| 字段 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `assetRoot` | string | 包内 `assets/wps365-docs/` | 绝对路径；打包应用把资源复制到别处时用 |
-| `cli` | string \| false | `~/.local/bin/wps365-cli` | `wps365-cli` 可执行文件路径；`false` = 不向模型报告 CLI |
-| `python` | string \| false | 未设置 | 带 openpyxl / python-docx 的解释器绝对路径；不设置则让模型用 `load_workspace_dependencies` 返回的 Python |
+| 字段 | 默认 | 作用 |
+|---|---|---|
+| `cli` | `~/.local/bin/wps365-cli` | `wps365-cli` 的位置；设成 `false` 表示不注入 CLI 路径 |
+| `python` | 未设置 | 指定跑脚本的解释器（需带 openpyxl / python-docx）；不设则用 `load_workspace_dependencies` 的 |
+| `assetRoot` | 插件自带资源目录 | 绝对路径，仅当技能资源被搬到别处时需要 |
 
-在 profile 自己的 `cordis.patch.yml` 里改（**patch 是整体替换 `config`，要写全**）：
+在 profile 自己的 `cordis.patch.yml` 里覆盖（patch 是整体替换 `config`，要写全）：
 
 ```yaml
 - id: skill-wps365-docs
@@ -81,67 +89,47 @@ plugin_manager { action: "remove_bundle", target: "dsh-wps365-plugin" }
     python: /opt/python/bin/python3
 ```
 
-字段名写错会在激活时直接报错（`unknown config field "..."`），不会静默忽略。
+字段名写错会在激活时直接报错，不会静默忽略。
 
-## 前置条件
+## 使用时的注意事项
 
-1. **`wps365-cli`**：本插件不安装它，只使用它。默认路径 `~/.local/bin/wps365-cli`；没授权就先
-   `wps365-cli config init` 和 `wps365-cli auth login --device`。路径不同请配 `cli`，或让模型给脚本传 `--cli`。
-   技能可用不代表 CLI 已授权 —— CLI 缺失/未授权时插件仍会正常加载，只是把「⚠️ 未找到 wps365-cli」写进技能正文。
-2. **Python + openpyxl**：`file_fetch.py`（`.xlsx` 公式解析）和 `xlsx_edit.py` 需要 openpyxl。
-   技能说明里让模型用 `load_workspace_dependencies` 返回的解释器（该环境自带 openpyxl / python-docx）；
-   也可以配 `python` 固定一个。
-3. **`bash` 工具**：脚本由模型通过 `bash` 跑（技能不注册任何 Host 工具）。技能还需要文件读写工具来分页读 `doc.md`、`read_image` 看图。
-4. **并发比对用的快照/备份目录**（如 `/tmp`）：技能要求写入前先导出备份。
+- **云文档没有本地撤销**：插件会按技能要求先导出备份，但重要文档建议你自己也留一份。
+- **写入超时不等于写入失败**：智能文档的写入接口可能已在服务端提交只是响应没回来，所以它重试前会先查块数，避免写两遍。
+- **写入前一定要看冲突结论**：它报冲突时，正确做法是重新拉最新版本、合并你的改动后再写；确实要覆盖才会用强制参数。
+- **规模上限**：智能文档单次写入 1000 块（脚本自动分批）；代码块语言只有接口枚举内的才保留（写 `powershell` 会被静默降级成纯文本，它知道这件事）。
+- **普通文件走"下载 → 本地改 → 传回"**：`.docx` / `.xlsx` / `.pptx` 没有可用的逐段写接口，公式、格式、合并、多工作表全靠整文件传回保住。云端 `.xlsx` 的接口写入是异步落盘的，写完不要立刻下载校验。
+- **权限边界**：它用你本机 `wps365-cli` 的身份和权限操作云文档，能读写的就是那个账号能读写的东西；插件自己不保存、也不接触凭据。
+- **上下文开销**：技能正文保持精简，细节（17 条硬约束、接口细节、并发实测语义）放在三份按需读取的参考文档里，只有真需要时才读。
+- **升级**：换版本需要重启 Harness 才会加载新的 JS；只改技能文档（`assets/**`）的话，下次加载技能即生效。
+- 本插件**不注册**任何新工具、也不改动你 profile 里的 MCP 配置；`mcp__wps365__*`（如果你配了 WPS 的 MCP）与它是两套独立能力。
 
-## 与 `~/.dsh/skills/wps365-docs` 的关系
+## 验证安装
 
-两者可以共存，但**同名技能在同一个 layer 里按 rank 取小者**：
-
-| 来源 | rank |
-|---|---|
-| `<项目>/.dsh/skills` / `.agents/skills` | 100 / 200 |
-| 用户自定义目录 / `~/.dsh/skills` / `~/.agents/skills` | 300 / 400 / 500 |
-| **本插件（bundled）** | **600** |
-
-也就是说 `~/.dsh/skills/wps365-docs` 会**盖住**插件里的版本。想让插件版本生效，删掉（或改名）那份手动安装的副本：
+离线自查（不需要 Harness、不需要联网、不会碰你的云文档）：
 
 ```bash
-rm -rf ~/.dsh/skills/wps365-docs
-```
-
-`dsh-skill-filesystem` 会 watch 技能根目录，删除后无需重启。
-
-## 验证
-
-离线（无需 Harness、无需联网、无需安装）：
-
-```bash
-node --test          # 30 个用例：catalog 纯函数 + bundle/补丁结构 + apply() 契约 + 配置校验
+node --test          # 30 个用例：技能解析/资源预算、bundle 与补丁结构、apply() 契约、配置校验
 node --check index.js
 python3 -m py_compile assets/wps365-docs/scripts/*.py
 ```
 
-（其中 1 个用例在能解析到 Host 的 `yaml` 包时才会真正解析补丁，否则跳过 —— 仓库本身不引入依赖。）
+真实验证：让 agent 读一篇你确定有权限的文档，问它"这篇文档的标题是什么、有几个表格"，确认拿到的是真实内容；再让它用 `--dry-run` 写一次（只做转换、不写入、不产生文件），看块结构与比对输出是否符合预期，然后才动真文档。
 
-装进 profile 后：
+## 仓库结构（想改插件的人看）
 
-1. 用 `cordis_inspect_query`（Host）确认多出 `skill-wps365-docs` 行且已激活；`plugin_manager list_plugins` 也可，但要权限。
-2. 新开一个会话问「读一下这个 WPS 文档 <file_id>」，确认模型调到 `wps365-docs` 技能、且技能正文里出现了「本机资源（由 dsh-wps365-plugin 注入）」区块。
-3. 若 CLI 未授权，技能正文应出现 ⚠️ 提示，且调用脚本时 CLI 报未登录 —— 这是环境问题，不是插件问题。
+```
+index.js                      # Host 插件：向 ctx.skills 注册 wps365-docs
+src/plugin-config.js          # 配置校验（手写 Standard Schema v1，零依赖）
+src/skill-catalog.js          # 纯函数：解析技能 frontmatter、构造 catalog entry、渲染本机资源块
+cordis.patch.yml              # bundle patch：插入 skill-wps365-docs 行
+assets/wps365-docs/
+├── SKILL.md                  # 常驻正文（约 3.4k 字符，控制在 8192 的修剪阈值内）
+├── references/               # otl.md / office-files.md / concurrency.md，按需读取
+└── scripts/                  # otl_fetch.py otl_write.py file_fetch.py file_write.py xlsx_edit.py
+locale/{en,zh}.json  icon.svg  test/
+```
 
-## 已知限制
-
-- 安装/替换**已安装包的新版本**需要重启 Harness 才能加载新的 JS 模块代（配置改动可以走 HMR）。
-- 技能正文里的 `{skillDir}` 只在插件注入的区块里定义；如果绕过技能系统直接读 `assets/wps365-docs/SKILL.md`，需要自己把占位符换成实际路径。
-- 脚本原样随包分发，其实现细节（参数、行为、数值）以脚本本身为准；`references/` 保留的是撰写时的实测结论。
-- 本仓库把包标为 `"private": true`，避免误发 npm；要发布时删掉该字段并补 `repository` / `publishConfig`。
-
-## 开发
-
-- 只改技能文档：编辑 `assets/wps365-docs/**`，下次加载技能时即生效（`get()` 每次现读 SKILL.md），**不需要**重装插件。
-- 改了 `index.js` / `src/**`：需要重装 bundle 并重启（见「已知限制」）。
-- 新增脚本：加进 `assets/wps365-docs/scripts/`，再在 `src/skill-catalog.js` 的 `SKILL_SCRIPTS` 里登记 —— 激活时会校验它是否存在。
+技能正文里的路径统一写成 `{skillDir}` 占位符，加载时由插件注入真实绝对路径，所以同一份资源放在 profile bundle、工作区 bundle 或打包应用里都能用。包被标成 `"private": true` 防止误发 npm，要发布时删掉并补 `repository` / `publishConfig`。
 
 ## 许可
 
