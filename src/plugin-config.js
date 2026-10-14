@@ -7,6 +7,18 @@
  * installable with zero runtime dependencies, so `install_bundle` never has to
  * resolve a package from a registry.
  *
+ * Known consequence: DSH's Config inspector projects a JSON Schema only for
+ * native Schemastery graphs (`isNativeConfigSchema` in `@deepseek-ai/dsh-app-boot`
+ * checks `Symbol.for('schemastery')`, `type`, and `meta`). This hand-written
+ * object fails that check, so the row is reported with `status: "unsupported"`
+ * and no config form is rendered for it. The loader treats that as a report, not
+ * an error: the row still mounts, `apply()` runs, and `~standard.validate`
+ * performs the real validation. To change a field, override the row in the
+ * profile's `cordis.patch.yml` (`CONFIG_JSON_SCHEMA` below is the same contract,
+ * for humans and other tooling). Faking the Schemastery graph protocol was
+ * rejected deliberately: it would couple the bundle to another package's
+ * internals for a display-only benefit.
+ *
  * @module dsh-wps365-plugin/config
  */
 

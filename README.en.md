@@ -91,6 +91,8 @@ Override the row in the profile's own `cordis.patch.yml` (a patch replaces the w
 
 A mistyped field fails activation instead of being ignored.
 
+> ⚠️ This config is hand-written (to keep the package dependency-free) rather than a native Schemastery graph, so DSH's config inspection and settings UI do **not** render a config form for this row (`cordis_inspect_query` reports it as `unsupported`). It does not affect the plugin: the row mounts, the skill loads, and field validation still runs — only *changing* the config means editing the YAML above. The defaults are already right on a normal install.
+
 ## Things to keep in mind
 
 - **Cloud documents have no local undo**: the skill exports a backup before writing, but keep your own copy of anything important.
