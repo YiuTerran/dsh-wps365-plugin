@@ -51,7 +51,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "check:pack": "node scripts/check-package.mjs"
+    "check:pack": "node scripts/check-package.mjs",
+    "prepack": "node scripts/clean-bytecode.mjs"
   },
   "dsh": {
     "bundle": {
