@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 24 matches the DSH desktop runtime; 22 keeps the bundle honest about the
+        # older LTS it claims to support.
+        node-version: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      # Nothing to install: the bundle is dependency-free by design and the tests
+      # import only node: builtins. `npm install` here would be a no-op.
+      - name: Run tests
+        run: npm test
+
+      # Fail if the published file set drifts (a missing assets/ or locale/ entry
+      # would break installed bundles, not this checkout).
+      - name: Inspect the publish tarball
+        run: npm run check:pack

@@ -17,13 +17,20 @@ const read = (relative) => readFileSync(new URL(relative, ROOT), 'utf8')
 const manifest = JSON.parse(read('package.json'))
 const patch = read(manifest.dsh.bundle.patch)
 
-test('the manifest declares an installable Host-only bundle', () => {
+test('the manifest declares a publishable Host-only bundle', () => {
   assert.equal(manifest.type, 'module')
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
-  assert.equal(manifest.private, true, 'keep the publish guard on')
+  assert.equal(manifest.main, './index.js')
+  // Published to npm since 0.1.1 — the Plugin Manager installs it by package name.
+  assert.notEqual(manifest.private, true, 'a private package cannot be published')
+  assert.equal(manifest.repository.url, 'git+https://github.com/YiuTerran/dsh-wps365-plugin.git')
+  assert.equal(manifest.publishConfig.access, 'public')
+  // No dependency claims: bare imports do not resolve from a profile directory
+  // (they live inside the app bundle), and DSH rejects installs whose declared
+  // peer ranges disagree with the running runtime.
   assert.equal(manifest.dependencies, undefined)
   assert.equal(manifest.peerDependencies, undefined)
-  assert.equal(manifest.main, './index.js')
+  assert.equal(manifest.devDependencies, undefined)
 })
 
 test('every path listed in `files` exists', () => {

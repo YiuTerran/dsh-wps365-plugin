@@ -4,5 +4,10 @@
 node_modules/
 .pnpm-store/
 *.log
+# npm pack output
+*.tgz
+# Python bytecode left behind by running the shipped scripts
+__pycache__/
+*.pyc
 # macOS
 .DS_Store

@@ -49,16 +49,24 @@
 
 ## 安装
 
-在 DSH 里让 agent 调用：
+**从 npm 装（推荐）** —— 已发布到 npm，按包名安装即可：
 
-```
-plugin_manager { action: "install_bundle", target: "/绝对路径/dsh-wps365-plugin" }
+```bash
+dsh plugin --profile desktop add dsh-wps365-plugin
 ```
 
-命令行等价写法：
+也可以在 DSH 的插件管理器界面里搜索 `dsh-wps365-plugin` 安装。
+
+**从本地目录装**（改插件时用，软链到仓库，改完即时生效）：
 
 ```bash
 dsh plugin --profile desktop add /绝对路径/dsh-wps365-plugin
+```
+
+或让 agent 调用：
+
+```
+plugin_manager { action: "install_bundle", target: "dsh-wps365-plugin" }
 ```
 
 装好后新开一个会话，问一句"读一下这篇 WPS 文档 `<file_id>`"。确认生效的方法：加载进来的技能正文**末尾**会附带一段「本机资源（由 dsh-wps365-plugin 注入）」，里面给出脚本目录、`wps365-cli` 路径和该用哪个 Python。
@@ -68,6 +76,8 @@ dsh plugin --profile desktop add /绝对路径/dsh-wps365-plugin
 ```
 plugin_manager { action: "remove_bundle", target: "dsh-wps365-plugin" }
 ```
+
+> ⚠️ 请使用 **0.1.1 或更高版本**。0.1.0 有一个会让 Harness 打不开的严重问题，它从未发布到 npm；详见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 配置（可选）
 
@@ -129,14 +139,19 @@ assets/wps365-docs/
 ├── references/               # otl.md / office-files.md / concurrency.md，按需读取
 └── scripts/                  # otl_fetch.py otl_write.py file_fetch.py file_write.py xlsx_edit.py
 locale/{en,zh}.json  icon.svg  test/
+scripts/check-package.mjs     # 校验 npm 打包内容（CI 也会跑）
+.github/workflows/            # ci.yml 跑测试与打包检查；release.yml 打 tag 时发布 npm
+CHANGELOG.md  RELEASING.md    # 版本变更与发布流程
 ```
 
-技能正文里的路径统一写成 `{skillDir}` 占位符，加载时由插件注入真实绝对路径，所以同一份资源放在 profile bundle、工作区 bundle 或打包应用里都能用。包被标成 `"private": true` 防止误发 npm，要发布时删掉并补 `repository` / `publishConfig`。
+技能正文里的路径统一写成 `{skillDir}` 占位符，加载时由插件注入真实绝对路径，所以同一份资源放在 profile bundle、工作区 bundle 或打包应用里都能用。
+
+包已发布到 npm（`publishConfig.access: public`），发布流程与注意事项见 [RELEASING.md](RELEASING.md)，版本历史见 [CHANGELOG.md](CHANGELOG.md)。刻意**不声明任何 `dependencies` / `peerDependencies`**：profile 目录解析不到 `@deepseek-ai/*`（它们在 app 包内），而声明 peer 范围会被 DSH 的兼容性检查用来拒绝安装。
 
 ## 更新记录
 
-- **0.1.1** — 修复一个**会导致 Harness 打不开**的严重问题。0.1.0 的手写 Config 上带了一个 `toJSON()` 方法，而 DSH 的 settings 服务用 `"toJSON" in schema` 这个鸭子类型挑选要渲染的 schema，选中后紧接着读 `schema.meta.volatile` —— 手写对象没有 `meta`，于是抛 `TypeError`，`settings/describe` 失败，桌面端 welcome RPC 报 `Web RPC failed`，窗口起不来。删掉 `toJSON()` 即可（`~standard.validate` 不受影响，配置校验照常），并加了回归测试锁住这个形状。
-- **0.1.0** — 首个版本：把 `wps365-docs` 技能打包成 DSH bundle。
+- **0.1.1** — 修复一个**会导致 Harness 打不开**的严重问题。0.1.0 的手写 Config 上带了一个 `toJSON()` 方法，而 DSH 的 settings 服务用 `"toJSON" in schema` 这个鸭子类型挑选要渲染的 schema，选中后紧接着读 `schema.meta.volatile` —— 手写对象没有 `meta`，于是抛 `TypeError`，`settings/describe` 失败，桌面端 welcome RPC 报 `Web RPC failed`，窗口起不来。删掉 `toJSON()` 即可（`~standard.validate` 不受影响，配置校验照常），并加了回归测试锁住这个形状。同一版本起开始发布到 npm。
+- **0.1.0** — 首个版本：把 `wps365-docs` 技能打包成 DSH bundle。**请勿使用**，未发布到 npm。
 
 ## 许可
 

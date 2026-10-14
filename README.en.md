@@ -49,16 +49,24 @@ It also carries the hard-won lessons of this workflow (17 hard constraints for s
 
 ## Install
 
-Ask the agent inside DSH to call:
+**From npm (recommended)** — install it by package name:
 
-```
-plugin_manager { action: "install_bundle", target: "/absolute/path/dsh-wps365-plugin" }
+```bash
+dsh plugin --profile desktop add dsh-wps365-plugin
 ```
 
-Command-line equivalent:
+You can also search for `dsh-wps365-plugin` in the DSH Plugin Manager UI.
+
+**From a local directory** (for plugin development — it links the checkout, so edits apply immediately):
 
 ```bash
 dsh plugin --profile desktop add /absolute/path/dsh-wps365-plugin
+```
+
+Or ask the agent to call:
+
+```
+plugin_manager { action: "install_bundle", target: "dsh-wps365-plugin" }
 ```
 
 Then start a session and ask it to read a WPS document by `file_id`. To confirm it took effect, the loaded skill body ends with a "本机资源（由 dsh-wps365-plugin 注入）" block giving the script directory, the `wps365-cli` path, and which Python to use.
@@ -68,6 +76,8 @@ Uninstall:
 ```
 plugin_manager { action: "remove_bundle", target: "dsh-wps365-plugin" }
 ```
+
+> ⚠️ Use **0.1.1 or newer**. 0.1.0 has a severe bug that stops Harness from opening; it was never published to npm. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Config (optional)
 
@@ -129,14 +139,19 @@ assets/wps365-docs/
 ├── references/               # otl.md / office-files.md / concurrency.md, read on demand
 └── scripts/                  # otl_fetch.py otl_write.py file_fetch.py file_write.py xlsx_edit.py
 locale/{en,zh}.json  icon.svg  test/
+scripts/check-package.mjs     # verifies the npm tarball contents (CI runs it too)
+.github/workflows/            # ci.yml runs tests + the tarball check; release.yml publishes on a tag
+CHANGELOG.md  RELEASING.md    # version history and the release procedure
 ```
 
-Asset paths are written as a `{skillDir}` placeholder and resolved into real absolute paths at load time, so the same assets work from a profile bundle, a workspace bundle, or a packaged app. The package is marked `"private": true` to prevent accidental publishing; drop it and add `repository` / `publishConfig` to publish.
+Asset paths are written as a `{skillDir}` placeholder and resolved into real absolute paths at load time, so the same assets work from a profile bundle, a workspace bundle, or a packaged app.
+
+The package is published to npm (`publishConfig.access: public`). The release procedure lives in [RELEASING.md](RELEASING.md) and the version history in [CHANGELOG.md](CHANGELOG.md). It deliberately declares **no `dependencies` / `peerDependencies`**: a profile directory cannot resolve `@deepseek-ai/*` (those live inside the app bundle), and declaring peer ranges only gives DSH's compatibility check a reason to reject the install.
 
 ## Changelog
 
-- **0.1.1** — Fixes a severe bug that made Harness **unable to open**. The hand-written Config in 0.1.0 carried a `toJSON()` method, and DSH's settings service selects the schemas it renders with a `"toJSON" in schema` duck-type test, then immediately reads `schema.meta.volatile`. A hand-written object has no `meta`, so the read threw a `TypeError`, `settings/describe` failed, and the desktop welcome RPC reported `Web RPC failed`. Deleting `toJSON()` fixes it (`~standard.validate` is unaffected, so config validation still runs), and a regression test now pins that shape.
-- **0.1.0** — First release: packages the `wps365-docs` skill as a DSH bundle.
+- **0.1.1** — Fixes a severe bug that made Harness **unable to open**. The hand-written Config in 0.1.0 carried a `toJSON()` method, and DSH's settings service selects the schemas it renders with a `"toJSON" in schema` duck-type test, then immediately reads `schema.meta.volatile`. A hand-written object has no `meta`, so the read threw a `TypeError`, `settings/describe` failed, and the desktop welcome RPC reported `Web RPC failed`. Deleting `toJSON()` fixes it (`~standard.validate` is unaffected, so config validation still runs), and a regression test now pins that shape. Also the first version published to npm.
+- **0.1.0** — First release: packages the `wps365-docs` skill as a DSH bundle. **Do not use** — never published to npm.
 
 ## License
 
