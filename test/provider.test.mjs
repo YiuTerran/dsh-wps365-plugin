@@ -88,13 +88,41 @@ test('apply() registers one provider that serves the bundled skill', async () =>
   assert.ok(skill.content.includes('未找到'), 'a missing CLI must be reported to the model')
 })
 
-test('the default config reports the CLI path expanded from the home directory', async () => {
+test('an existing CLI path is pinned in the injected block', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-wps365-'))
+  try {
+    // Create the executable so this branch does not depend on the machine
+    // having wps365-cli installed at all (CI runners do not).
+    const cli = join(dir, 'wps365-cli')
+    writeFileSync(cli, '#!/bin/sh\n', { mode: 0o755 })
+
+    const { ctx, providers } = stubContext()
+    apply(ctx, { cli })
+    const [candidate] = await providers[0].list()
+    const skill = await providers[0].get(candidate, {})
+
+    assert.ok(skill.content.includes(`\`wps365-cli\` = \`${cli}\``), 'the resolved CLI path must reach the model')
+    assert.ok(!skill.content.includes('未找到'), 'an existing CLI must not be reported as missing')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the default config reports the CLI state without leaking a tilde', async () => {
   const { ctx, providers } = stubContext()
   apply(ctx, {})
   const [candidate] = await providers[0].list()
   const skill = await providers[0].get(candidate, {})
-  assert.ok(skill.content.includes('`wps365-cli` = `'), 'the default CLI line must be present')
+
+  // Whether ~/.local/bin/wps365-cli exists is a property of the machine, not of
+  // the bundle (a CI runner has no such file, a developer machine usually does),
+  // so assert the invariant rather than the environment: the block always says
+  // which CLI to use, and a raw tilde never reaches the model.
+  const reportsPath = skill.content.includes('`wps365-cli` = `')
+  const reportsMissing = skill.content.includes('`wps365-cli` 未找到')
+  assert.ok(reportsPath || reportsMissing, 'the block must always report the CLI state')
   assert.ok(!skill.content.includes('~/.local/bin'), 'the tilde must be expanded before the model sees it')
+  assert.ok(!skill.content.includes('`~/'), 'no unexpanded tilde path may reach the model')
 })
 
 test('every load re-reads SKILL.md, so edits need no reload', async () => {
