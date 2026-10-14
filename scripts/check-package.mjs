@@ -59,7 +59,10 @@ const FORBIDDEN = [
 const FORBIDDEN_SUFFIXES = ['.pyc', '.pyo', '.log', '.tgz']
 
 const raw = execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: root, encoding: 'utf8' })
-const [report] = JSON.parse(raw)
+// `npm pack` runs `prepack` first, and any lifecycle output shares stdout with
+// the JSON payload; start at the array rather than assuming stdout is pure JSON.
+const jsonStart = raw.indexOf('[')
+const [report] = JSON.parse(jsonStart === -1 ? raw : raw.slice(jsonStart))
 const paths = report.files.map((file) => file.path)
 
 const missing = REQUIRED.filter((path) => !paths.includes(path))

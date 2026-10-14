@@ -41,10 +41,12 @@ function sweep(directory) {
 try {
   statSync(root)
 } catch {
-  console.log('no assets directory; nothing to clean')
+  console.error('no assets directory; nothing to clean')
   process.exit(0)
 }
 
 sweep(root)
-console.log(removed.length === 0 ? 'no Python bytecode to remove' : `removed ${removed.length} bytecode path(s)`)
-for (const path of removed) console.log(`  - ${path.slice(root.length)}`)
+// stderr on purpose: `npm pack --json` captures stdout, so anything printed here
+// would be prepended to the JSON that scripts/check-package.mjs parses.
+console.error(removed.length === 0 ? 'no Python bytecode to remove' : `removed ${removed.length} bytecode path(s)`)
+for (const path of removed) console.error(`  - ${path.slice(root.length)}`)

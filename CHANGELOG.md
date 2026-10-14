@@ -14,6 +14,10 @@
   - 脚本侧同样平台化：`_wps_cli.py` 优先用 `shutil.which`（Windows 上自动尊重 `PATHEXT`），并支持 `WPS365_INSTALL_DIR` 覆盖安装目录。
 - 测试新增 `test/cli-locate.test.mjs`：在 macOS 上覆盖 Windows 语义（扩展名探测、`PATHEXT`、`;` 分隔的 `PATH`、`%USERPROFILE%`、原生分隔符拼接），全部用注入的假文件系统，无需真机。
 
+### 修复
+
+- **发布产物不再可能夹带 Python 字节码**：跑过任一脚本后会在 `assets/wps365-docs/scripts/` 留下 `__pycache__`，而 `files` 白名单包含整个 `assets/`，所以从"刚跑过脚本"的工作树发布就会把它带上（曾发生过一次，52 KiB）。现在 `prepack` 会在打包前清理，`npm run check:pack` 也会在字节码从别的路径混进来时直接失败。
+
 ## [0.1.1] - 2026-10-14
 
 ### 修复
