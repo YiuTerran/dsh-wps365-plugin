@@ -15,6 +15,10 @@
 - 修正 `references/office-files.md` 中与实测不符的说法：`file_write.py --md` 生成 docx 时行内代码没有样式、`[文本](url)` 会以字面文本留在文档里、引用块落到 `Normal` 样式；版本回滚不能用 API（`versions/{n}/download` 与 `revert` 实测 404），只能靠 `--backup-dir` 的本地副本；「上传后二进制异步落盘」是间歇性现象。
 - 补充 `references/otl.md` 中实测到的转换器行为：任务列表勾选框会丢失并降级为有序列表项；表格表头会被写成加粗。
 
+### 发布
+
+- 发布到 npm 的包名是 **`@tryao/dsh-wps365-plugin`**（scoped）。最初按无 scope 的 `dsh-wps365-plugin` 发布时被 npm 的包名反垃圾过滤拦下（`403 Package name triggered spam detection`），改用账号自身的 scope 绕开。GitHub 仓库名仍然是 `dsh-wps365-plugin`，源码与文档里的 URL 不受影响。
+
 ## [0.1.0] - 2026-10-14
 
 ### 新增

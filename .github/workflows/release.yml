@@ -1,12 +1,12 @@
 name: Release
 
-# Publishes dsh-wps365-plugin to npm when a v* tag is pushed.
+# Publishes @tryao/dsh-wps365-plugin to npm when a v* tag is pushed.
 #
 # Uses npm Trusted Publishing (OIDC), so no NPM_TOKEN secret is stored in the
 # repository. Configure the trusted publisher once on npmjs.com:
 #   package → Settings → Trusted Publisher → GitHub Actions
 #   organization/user: YiuTerran
-#   repository:        dsh-wps365-plugin
+#   repository:        dsh-wps365-plugin   (GitHub repository name, not the npm name)
 #   workflow filename: release.yml
 #   environment:       (leave empty)
 # See RELEASING.md. If you prefer a token instead, add an NPM_TOKEN secret and
@@ -51,5 +51,23 @@ jobs:
             exit 1
           fi
 
+      # The very first release has to be published locally (a Trusted Publisher
+      # can only be configured once the package exists), so re-tagging that same
+      # version must be a no-op instead of a red "cannot publish over existing
+      # version" run.
+      - name: Check whether this version is already published
+        id: registry
+        run: |
+          set -euo pipefail
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "$name@$version is already on the registry — nothing to publish."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish to npm
+        if: steps.registry.outputs.exists == 'false'
         run: npm publish --provenance

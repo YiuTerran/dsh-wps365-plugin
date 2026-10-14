@@ -5,7 +5,7 @@
  * contract can be unit-tested without a running Harness: `index.js` owns the
  * filesystem reads and the Cordis wiring.
  *
- * @module dsh-wps365-plugin/skill-catalog
+ * @module @tryao/dsh-wps365-plugin/skill-catalog
  */
 
 /** Skill name as it appears in the catalog and in `skill` tool calls. */
@@ -148,7 +148,7 @@ export function buildRuntimeHint({ skillDir, cli, cliExists, python }) {
   const scriptsDir = `${dir}/scripts/`
   const lines = [
     '',
-    '## 本机资源（由 dsh-wps365-plugin 注入）',
+    '## 本机资源（由 @tryao/dsh-wps365-plugin 注入）',
     '',
     `- \`{skillDir}\` = \`${dir}\``,
     `- 脚本目录 = \`${scriptsDir}\`（${SKILL_SCRIPTS.join('、')}）`,

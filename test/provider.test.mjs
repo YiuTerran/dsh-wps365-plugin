@@ -82,7 +82,7 @@ test('apply() registers one provider that serves the bundled skill', async () =>
   assert.equal(skill.provider, PROVIDER_NAME)
   assert.deepEqual(skill.resourceBase, { kind: 'directory', path: ASSET_ROOT })
   assert.ok(skill.content.includes('# 读取与写入 WPS 365 云文档'))
-  assert.ok(skill.content.includes('## 本机资源（由 dsh-wps365-plugin 注入）'), 'the environment block must be appended')
+  assert.ok(skill.content.includes('## 本机资源（由 @tryao/dsh-wps365-plugin 注入）'), 'the environment block must be appended')
   assert.ok(skill.content.includes(`\`{skillDir}\` = \`${ASSET_ROOT.replace(/\/+$/, '')}\``))
   assert.ok(!skill.content.includes('wps365-docs//'), 'the injected block must not double the path separator')
   assert.ok(skill.content.includes('未找到'), 'a missing CLI must be reported to the model')

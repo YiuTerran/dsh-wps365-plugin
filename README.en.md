@@ -1,4 +1,4 @@
-# dsh-wps365-plugin
+# @tryao/dsh-wps365-plugin
 
 Gives your DSH **WPS 365 cloud document** superpowers.
 
@@ -52,12 +52,12 @@ It also carries the hard-won lessons of this workflow (17 hard constraints for s
 **From npm (recommended)** — install it by package name:
 
 ```bash
-dsh plugin --profile desktop add dsh-wps365-plugin
+dsh plugin --profile desktop add @tryao/dsh-wps365-plugin
 ```
 
-You can also search for `dsh-wps365-plugin` in the DSH Plugin Manager UI.
+You can also search for `@tryao/dsh-wps365-plugin` in the DSH Plugin Manager UI.
 
-**From a local directory** (for plugin development — it links the checkout, so edits apply immediately):
+**From a local directory** (for plugin development — it links the checkout, so edits apply immediately; this path is the **repository directory**, unrelated to the npm name):
 
 ```bash
 dsh plugin --profile desktop add /absolute/path/dsh-wps365-plugin
@@ -66,15 +66,15 @@ dsh plugin --profile desktop add /absolute/path/dsh-wps365-plugin
 Or ask the agent to call:
 
 ```
-plugin_manager { action: "install_bundle", target: "dsh-wps365-plugin" }
+plugin_manager { action: "install_bundle", target: "@tryao/dsh-wps365-plugin" }
 ```
 
-Then start a session and ask it to read a WPS document by `file_id`. To confirm it took effect, the loaded skill body ends with a "本机资源（由 dsh-wps365-plugin 注入）" block giving the script directory, the `wps365-cli` path, and which Python to use.
+Then start a session and ask it to read a WPS document by `file_id`. To confirm it took effect, the loaded skill body ends with a "本机资源（由 @tryao/dsh-wps365-plugin 注入）" block giving the script directory, the `wps365-cli` path, and which Python to use.
 
 Uninstall:
 
 ```
-plugin_manager { action: "remove_bundle", target: "dsh-wps365-plugin" }
+plugin_manager { action: "remove_bundle", target: "@tryao/dsh-wps365-plugin" }
 ```
 
 > ⚠️ Use **0.1.1 or newer**. 0.1.0 has a severe bug that stops Harness from opening; it was never published to npm. See [CHANGELOG.md](CHANGELOG.md).

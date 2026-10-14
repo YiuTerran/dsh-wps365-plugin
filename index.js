@@ -1,5 +1,5 @@
 /**
- * dsh-wps365-plugin — ship the `wps365-docs` skill (WPS 365 cloud documents)
+ * @tryao/dsh-wps365-plugin — ship the `wps365-docs` skill (WPS 365 cloud documents)
  * as a DeepSeek Harness bundle.
  *
  * The plugin registers one skill provider with `ctx.skills`, mirroring how the
@@ -12,7 +12,7 @@
  * Import-free by design: no package is resolved from a registry when the bundle
  * is installed, and `Config` is a hand-written Standard Schema v1 document.
  *
- * @module dsh-wps365-plugin
+ * @module @tryao/dsh-wps365-plugin
  */
 import { readFileSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'

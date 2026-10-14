@@ -1,5 +1,5 @@
 {
-  "name": "dsh-wps365-plugin",
+  "name": "@tryao/dsh-wps365-plugin",
   "version": "0.1.1",
   "description": "Bundle that ships the wps365-docs skill (read and write WPS 365 cloud documents) for the DeepSeek Harness",
   "type": "module",

@@ -1,4 +1,4 @@
-# dsh-wps365-plugin bundle patch.
+# @tryao/dsh-wps365-plugin bundle patch.
 #
 # ONE insert over the profile root: the skill row. `./index.js` is anchored
 # beside this patch file, so the row resolves the entry shipped in the same

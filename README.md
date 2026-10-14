@@ -1,4 +1,4 @@
-# dsh-wps365-plugin
+# @tryao/dsh-wps365-plugin
 
 给你的 DSH 装上 **WPS 365 云文档**能力。
 
@@ -52,12 +52,12 @@
 **从 npm 装（推荐）** —— 已发布到 npm，按包名安装即可：
 
 ```bash
-dsh plugin --profile desktop add dsh-wps365-plugin
+dsh plugin --profile desktop add @tryao/dsh-wps365-plugin
 ```
 
-也可以在 DSH 的插件管理器界面里搜索 `dsh-wps365-plugin` 安装。
+也可以在 DSH 的插件管理器界面里搜索 `@tryao/dsh-wps365-plugin` 安装。
 
-**从本地目录装**（改插件时用，软链到仓库，改完即时生效）：
+**从本地目录装**（改插件时用，软链到仓库，改完即时生效；这里的路径是**仓库目录**，与 npm 包名无关）：
 
 ```bash
 dsh plugin --profile desktop add /绝对路径/dsh-wps365-plugin
@@ -66,15 +66,15 @@ dsh plugin --profile desktop add /绝对路径/dsh-wps365-plugin
 或让 agent 调用：
 
 ```
-plugin_manager { action: "install_bundle", target: "dsh-wps365-plugin" }
+plugin_manager { action: "install_bundle", target: "@tryao/dsh-wps365-plugin" }
 ```
 
-装好后新开一个会话，问一句"读一下这篇 WPS 文档 `<file_id>`"。确认生效的方法：加载进来的技能正文**末尾**会附带一段「本机资源（由 dsh-wps365-plugin 注入）」，里面给出脚本目录、`wps365-cli` 路径和该用哪个 Python。
+装好后新开一个会话，问一句"读一下这篇 WPS 文档 `<file_id>`"。确认生效的方法：加载进来的技能正文**末尾**会附带一段「本机资源（由 @tryao/dsh-wps365-plugin 注入）」，里面给出脚本目录、`wps365-cli` 路径和该用哪个 Python。
 
 卸载：
 
 ```
-plugin_manager { action: "remove_bundle", target: "dsh-wps365-plugin" }
+plugin_manager { action: "remove_bundle", target: "@tryao/dsh-wps365-plugin" }
 ```
 
 > ⚠️ 请使用 **0.1.1 或更高版本**。0.1.0 有一个会让 Harness 打不开的严重问题，它从未发布到 npm；详见 [CHANGELOG.md](CHANGELOG.md)。

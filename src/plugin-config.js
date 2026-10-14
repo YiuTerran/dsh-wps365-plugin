@@ -1,5 +1,5 @@
 /**
- * Dependency-free configuration schema for the `dsh-wps365-plugin` bundle.
+ * Dependency-free configuration schema for the `@tryao/dsh-wps365-plugin` bundle.
  *
  * The Cordis loader validates a plugin row's `config` through the Standard
  * Schema v1 interface (`Config['~standard'].validate`); that is the only
@@ -24,7 +24,7 @@
  * Schemastery fields, which crashes the Desktop welcome RPC and makes the whole
  * application unopenable. Details at the `Config` export below.
  *
- * @module dsh-wps365-plugin/config
+ * @module @tryao/dsh-wps365-plugin/config
  */
 
 /** CLI location used when the row's `config.cli` is omitted. */
@@ -33,7 +33,7 @@ export const DEFAULT_CLI = '~/.local/bin/wps365-cli'
 /** Human-readable JSON Schema for tooling that renders a plugin row's config. */
 export const CONFIG_JSON_SCHEMA = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
-  title: 'dsh-wps365-plugin config',
+  title: '@tryao/dsh-wps365-plugin config',
   type: 'object',
   additionalProperties: false,
   properties: {
@@ -151,7 +151,7 @@ export function normalizeConfig(raw) {
 export const Config = {
   '~standard': {
     version: 1,
-    vendor: 'dsh-wps365-plugin',
+    vendor: '@tryao/dsh-wps365-plugin',
     /**
      * @param value - the raw row config.
      * @returns the normalized value, or the issues that reject it.
