@@ -27,11 +27,11 @@ python3 {skillDir}/scripts/file_fetch.py \
 ## 写入
 
 ```bash
-# 原地替换：file_id 与分享链接不变，版本历史保留（可 revert）
+# 原地替换：file_id 与分享链接不变，版本历史保留（但 API 回滚不了，见下面第 9 条）
 python3 {skillDir}/scripts/file_write.py --drive-id <盘> --file-id <file_id> \
   --file 本地文件 [--backup-dir /tmp/bk]
 
-# 新建文件（--md 先生成 docx：支持标题/列表/引用/表格/加粗/行内代码）
+# 新建文件（--md 先生成 docx：标题/无序有序列表/表格/加粗可靠；引用、行内代码、链接会降级，见下）
 python3 {skillDir}/scripts/file_write.py --drive-id <盘> --parent-id 0 --md 内容.md --name 新文档.docx
 
 # 只做连通性测试：只申请上传，不 PUT 不提交，**不产生任何文件**
@@ -65,6 +65,8 @@ python3 {skillDir}/scripts/xlsx_edit.py --drive-id <盘> --file-id <file_id> \
 
 `--set` 按内容推断类型（`123`→数字、`true`→布尔、`=…`→公式、其余字符串）。重算依赖 LibreOffice kit，脚本会自动探测路径，也可用 `--lo-cli` / `--node` 或环境变量 `DSH_LIBREOFFICE_CLI` / `DSH_NODE` 指定；**找不到时会跳过并明确告警**，不会静默丢缓存值。
 
+实测一条龙（2026-10-14，本机）：新建的 xlsx 上传（v1，openpyxl 生成的公式**无缓存值**）→ `--set "数据!B2=99" --set "数据!D2==B2*C2*2" --set "说明!A2=脚本写入"` → 输出 `已重算：3 个公式，3 个有缓存值` → 上传 v2，回读得到 `=B2*C2*2 → 792`、`=SUM(D2:D3) → 804`，合并区 `A6:B6` 与 13 位大数字 `1234567890123` 均无损。**LibreOffice 重算在本机是可用的**（不是跳过路径）。
+
 ## 底层路线与硬约束
 
 读：`.docx` 走 `GET /v7/drives/{drive_id}/files/{file_id}/content?format=markdown&include_elements=all` → `data.markdown`；`.xlsx` 默认本地解析，或 `GET /v7/sheets/{file_id}/worksheets[/{sheet_id}/range_data]`
@@ -78,7 +80,8 @@ python3 {skillDir}/scripts/xlsx_edit.py --drive-id <盘> --file-id <file_id> \
 6. 下载原件**必须带 delegated token**（脚本已处理），不带返回 `{"result":"userNotLogin"}`（与 .otl 附件相反，那些匿名可下）。
 7. 两个 `api post` 与 PUT 必须同一身份；不显式传 `--token-type delegated` 时默认 app 身份会因缺 `kso.file.readwrite` 报 403。
 8. `drive file download --with-hash` 的哈希**与下载字节一致（可信）**，可作回读校验（与 `attachment_list[].hash.sum` 正好相反）。
-9. 回滚老版本：`POST /v7/drives/{drive_id}/files/{file_id}/versions/{version_num}/revert`。
+9. **回滚只能靠自己的本地备份**：spec 里有 `POST /v7/drives/{drive_id}/files/{file_id}/versions/{version_num}/revert` 与 `versions/{version_num}/download`，但**网关实测两条都是 `404 page not found`**（同族的 `GET .../versions` 与 `.../versions/{n}/meta` 正常返回 `code 0`，所以不是路径写错）。CLI 也只包了 `file-version list` / `get`，没有 revert 命令。**结论：改重要文件前一定加 `--backup-dir`**，要回滚就把备份字节用 `file_write.py --file 备份 --expect-version <当前版本>` 传回去 —— 实测可行（v1 备份传回后版本号自增到 v4，内容与 v1 逐字节一致）。
+10. **`file_write.py --md` 生成 docx 的真实能力**（实测）：`#`/`##` → Heading 1/2 ✅、`- ` → `List Bullet` ✅、表格 → 真 Word 表格 ✅、`**加粗**` → run `bold=True` ✅；但 **`行内代码` 不带任何代码样式/等宽字体**、**`[文本](url)` 会以 `[文本](url)` 字面文本留在文档里**（不生成超链接）、**`>` 引用块落到 `Normal` 样式**（模板里有 `Intense Quote`，只是没用上）。需要这三种效果时，走"下载 → python-docx 改 → 传回"，或接受降级。
 
 ## .xlsx 的接口写入（仅作补充，不推荐当主路径）
 
@@ -89,7 +92,7 @@ python3 {skillDir}/scripts/xlsx_edit.py --drive-id <盘> --file-id <file_id> \
 - `POST /v7/sheets/{file_id}/worksheets` **可以新建工作表**：`{"name":"…","position":{"end":true}}`。（同一个路径下同时有 GET 和 POST，只看 GET 会误以为没有。）
 - 其他可用端点：`worksheets/{id}/update`（改名/移动）、`worksheets/{id}/copy`、`worksheets/batch_delete`、`range_data/batch_delete`、`range_data/find`、`worksheets/{id}/rows`（**追加行**，不是插入）、`filters`、`data_validations`、`protection_ranges`。
 - **确实没有**插入/删除行列的接口，也**没有修订痕迹（track changes）接口**。
-- ⚠️ **API 写入后二进制是异步落盘的**：写入立刻体现在 API 读取（`active_area`、`worksheets` 列表）上，但 `drive file download` 拿到的字节要等**文件版本号自增**（实测 v1→v5，每次间隔 20–30 秒）。**写完不要立刻下载校验**，否则会误判成"没保存成功"。
+- ⚠️ **API 写入后二进制是异步落盘的**：写入立刻体现在 API 读取（`active_area`、`worksheets` 列表）上，但 `drive file download` 拿到的字节要等**文件版本号自增**（实测 v1→v5，每次间隔 20–30 秒）。**写完不要立刻下载校验**，否则会误判成"没保存成功"。注意这个现象**不是每次必现**（2026-10-14 实测有一次上传后立刻下载就是新字节、sha1 与版本号都对），但别赌 —— 校验前先确认版本号自增了。
 
 ## 本地编辑的两个坑
 
