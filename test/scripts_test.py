@@ -22,6 +22,9 @@ on any host.
 """
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 import os
 import subprocess
 import sys
@@ -35,6 +38,7 @@ sys.path.insert(0, SCRIPTS)
 
 import _wps_cli  # noqa: E402
 import file_fetch  # noqa: E402
+import otl_write  # noqa: E402
 import xlsx_edit  # noqa: E402
 
 
@@ -233,11 +237,10 @@ class FindKitTest(unittest.TestCase):
                                  clear=False):
                 for key in ("DSH_NODE", "DSH_LIBREOFFICE_CLI"):
                     os.environ.pop(key, None)
-                node, cli = xlsx_edit.find_kit(None, None)
+                with mock.patch.object(xlsx_edit, "_node_spellings", return_value=["node.exe"]):
+                    node, cli = xlsx_edit.find_kit(None, None)
             self.assertEqual(cli, expected["cli"])
-            # `node.exe` only exists on Windows; elsewhere the search must still
-            # return a real interpreter rather than None.
-            self.assertTrue(node and os.path.isfile(node), node)
+            self.assertEqual(node, expected["node"])
 
     def test_explicit_arguments_win_over_discovery(self):
         node, cli = xlsx_edit.find_kit("/chosen/node", "/chosen/cli.js")
@@ -248,6 +251,104 @@ class FindKitTest(unittest.TestCase):
                                           "DSH_LIBREOFFICE_CLI": "/env/cli.js"}, clear=False):
             node, cli = xlsx_edit.find_kit(None, None)
         self.assertEqual((node, cli), ("/env/node", "/env/cli.js"))
+
+    def test_finds_node_in_dsh_runtime_with_both_platform_spellings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = os.path.join(tmp, "home")
+            runtime = os.path.join(home, "dsh-runtimes", "v1")
+            node_dir = os.path.join(runtime, "dependencies", "node", "bin")
+            os.makedirs(node_dir)
+            for spelling in ("node", "node.exe"):
+                node_path = os.path.join(node_dir, spelling)
+                with open(node_path, "w", encoding="utf-8"):
+                    pass
+                with mock.patch.object(xlsx_edit, "_search_roots", return_value=[]), \
+                     mock.patch.object(xlsx_edit, "_dsh_home", return_value=home), \
+                     mock.patch.object(xlsx_edit, "_node_spellings", return_value=[spelling]), \
+                     mock.patch.dict(os.environ, {"DSH_NODE": ""}), \
+                     mock.patch.object(xlsx_edit.shutil, "which", return_value=None):
+                    node, cli = xlsx_edit.find_kit(None, "/chosen/cli.js")
+                self.assertEqual(node, node_path)
+                self.assertEqual(cli, "/chosen/cli.js")
+                os.remove(node_path)
+
+    def test_missing_bundled_node_stays_missing(self):
+        with tempfile.TemporaryDirectory() as home:
+            with mock.patch.object(xlsx_edit, "_search_roots", return_value=[]), \
+                 mock.patch.object(xlsx_edit, "_dsh_home", return_value=home), \
+                 mock.patch.dict(os.environ, {"DSH_NODE": ""}), \
+                 mock.patch.object(xlsx_edit.shutil, "which", return_value=None):
+                node, cli = xlsx_edit.find_kit(None, "/chosen/cli.js")
+        self.assertIsNone(node)
+        self.assertEqual(cli, "/chosen/cli.js")
+
+
+class VerifySnapshotTest(unittest.TestCase):
+    """Block order participates in whole-document conflict checks."""
+
+    @staticmethod
+    def _snapshot(ids, *, scope=None, scope_explicit=False, version=1):
+        return {
+            "version": version,
+            "scope": scope or [],
+            "scope_explicit": scope_explicit,
+            "blocks": [{"block_id": bid, "hash": f"hash-{bid}"} for bid in ids],
+        }
+
+    def _verify(self, old, new, *, mode="append", allow_added=False, force=False):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "snapshot.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(old, fh)
+            with mock.patch.object(otl_write, "snapshot", return_value=new) as current:
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    count = otl_write.verify_snapshot(
+                        "cli", "file-id", path, mode, 30, allow_added, force)
+            current.assert_called_once_with("cli", "file-id", 30)
+        return count, output.getvalue()
+
+    def test_unchanged_snapshot_is_allowed(self):
+        count, output = self._verify(
+            self._snapshot(["a", "b"]), self._snapshot(["a", "b"], version=2))
+        self.assertEqual(count, 2)
+        self.assertIn("未被改动", output)
+
+    def test_replace_rejects_reorder_even_with_scope_and_allow_added(self):
+        old = self._snapshot(["a", "b"], scope=["a"], scope_explicit=True)
+        new = self._snapshot(["b", "a"], version=2)
+        with self.assertRaises(SystemExit) as caught:
+            self._verify(old, new, mode="replace", allow_added=True)
+        self.assertIn("一级块顺序变化", str(caught.exception))
+        self.assertIn("受影响：", str(caught.exception))
+
+    def test_unscoped_allow_added_does_not_allow_reorder(self):
+        with self.assertRaises(SystemExit) as caught:
+            self._verify(self._snapshot(["a", "b"]), self._snapshot(["b", "a"]),
+                         allow_added=True)
+        self.assertIn("一级块顺序变化", str(caught.exception))
+
+    def test_allow_added_accepts_insert_with_existing_order_preserved(self):
+        count, output = self._verify(
+            self._snapshot(["a", "b"]), self._snapshot(["a", "new", "b"]),
+            allow_added=True)
+        self.assertEqual(count, 3)
+        self.assertIn("仅新增块", output)
+
+    def test_explicit_scope_allows_unrelated_reorder(self):
+        old = self._snapshot(["a", "b"], scope=["a"], scope_explicit=True)
+        count, output = self._verify(old, self._snapshot(["b", "a"], version=2))
+        self.assertEqual(count, 2)
+        self.assertIn("只比对声明的 1 个依赖块", output)
+        self.assertIn("一级块顺序变化", output)
+
+    def test_force_logs_and_proceeds_on_reorder(self):
+        count, output = self._verify(
+            self._snapshot(["a", "b"]), self._snapshot(["b", "a"], version=2),
+            force=True)
+        self.assertEqual(count, 2)
+        self.assertIn("已忽略冲突（--force）", output)
+        self.assertIn("一级块顺序变化", output)
 
 
 if __name__ == "__main__":

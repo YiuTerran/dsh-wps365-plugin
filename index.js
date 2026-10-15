@@ -22,7 +22,7 @@ import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { expandPath, locateCli } from './src/cli-locate.js'
-import { Config, DEFAULT_CLI } from './src/plugin-config.js'
+import { Config } from './src/plugin-config.js'
 import {
   PROVIDER_NAME,
   SKILL_MODULES,
@@ -78,7 +78,7 @@ function resolveAssets(config) {
     throw new Error(`${PROVIDER_NAME}: ${skillPath} declares name "${parsed.name}", expected "${SKILL_NAME}"`)
   }
 
-  const cliValue = config.cli === false ? undefined : config.cli ?? DEFAULT_CLI
+  const cliValue = config.cli
   const python = config.python === false || config.python === undefined
     ? undefined
     : expandPath(config.python, { home: homedir(), env: process.env })
@@ -98,7 +98,7 @@ export function apply(ctx, config = {}) {
   // `resolved` is a real file (honouring PATHEXT on Windows); when nothing is
   // found the attempted path is still reported so the model can see where the
   // CLI was expected.
-  const { attempted, resolved } = cliValue === undefined
+  const { attempted, resolved } = cliValue === false
     ? { attempted: undefined, resolved: undefined }
     : locateCli({ cli: cliValue, platform: process.platform, env: process.env, home: homedir(), isFile })
   const cli = resolved ?? attempted

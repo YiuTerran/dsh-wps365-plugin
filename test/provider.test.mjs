@@ -8,7 +8,8 @@
  * rather than in a user's profile.
  */
 import assert from 'node:assert/strict'
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -124,6 +125,71 @@ test('the default config reports the CLI state without leaking a tilde', async (
   assert.ok(reportsPath || reportsMissing, 'the block must always report the CLI state')
   assert.ok(!skill.content.includes('~/.local/bin'), 'the tilde must be expanded before the model sees it')
   assert.ok(!skill.content.includes('`~/'), 'no unexpanded tilde path may reach the model')
+})
+
+test('default CLI discovery finds PATH in an isolated provider activation', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-wps365-cli-'))
+  try {
+    const home = join(dir, 'home')
+    const pathDir = join(dir, 'path')
+    mkdirSync(home)
+    mkdirSync(pathDir)
+    const cliName = `wps365-cli${process.platform === 'win32' ? '.exe' : ''}`
+    const cli = join(pathDir, cliName)
+    writeFileSync(cli, '#!/bin/sh\n', { mode: 0o755 })
+    assert.equal(existsSync(join(home, '.local', 'bin')), false)
+
+    const entryUrl = new URL('../index.js', import.meta.url).href
+    const missingCli = join(home, 'custom', cliName)
+    const script = `
+      import { apply } from ${JSON.stringify(entryUrl)}
+      async function capture(config) {
+        const providers = []
+        const warnings = []
+        const ctx = {
+          skills: { registerProvider(factory) { providers.push(factory()) } },
+          logger: { warn(message) { warnings.push(message) } },
+        }
+        apply(ctx, config)
+        const [candidate] = await providers[0].list()
+        const skill = await providers[0].get(candidate, {})
+        return { content: skill.content, warnings }
+      }
+      const result = {
+        default: await capture({}),
+        explicitMissing: await capture({ cli: ${JSON.stringify(missingCli)} }),
+        disabled: await capture({ cli: false }),
+      }
+      process.stdout.write(JSON.stringify(result))
+    `
+    const childEnv = {
+      HOME: home,
+      USERPROFILE: home,
+      PATH: pathDir,
+      ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+      ...(process.env.WINDIR ? { WINDIR: process.env.WINDIR } : {}),
+      ...(process.env.TEMP ? { TEMP: process.env.TEMP } : {}),
+      ...(process.env.TMP ? { TMP: process.env.TMP } : {}),
+    }
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      env: childEnv,
+      encoding: 'utf8',
+    })
+    assert.equal(child.status, 0, child.stderr)
+    const result = JSON.parse(child.stdout)
+
+    assert.ok(result.default.content.includes(`\`{cli}\` = \`${cli}\``))
+    assert.deepEqual(result.default.warnings, [])
+    assert.ok(result.explicitMissing.content.includes(missingCli))
+    assert.ok(result.explicitMissing.content.includes('未找到'))
+    assert.equal(result.explicitMissing.content.includes(cli), false)
+    assert.equal(result.explicitMissing.warnings.length, 1)
+    assert.ok(result.disabled.content.includes('不注入 CLI 路径'))
+    assert.deepEqual(result.disabled.warnings, [])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('every load re-reads SKILL.md, so edits need no reload', async () => {

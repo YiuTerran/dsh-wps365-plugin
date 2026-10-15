@@ -75,9 +75,9 @@ KIT_CLI_RELATIVE = ("app.asar.unpacked", "dsh", "node_modules", "@deepseek-ai",
 #: instead of "LibreOffice is unavailable". Relative to a search root, which is
 #: either the app directory or `DshHome`.
 KIT_NODE_GLOBS = (
-    os.path.join("dependencies", "node", "bin", "node"),
-    os.path.join("runtime", "*", "dependencies", "node", "bin", "node"),
-    os.path.join("*", "dependencies", "node", "bin", "node"),
+    os.path.join("dependencies", "node", "bin"),
+    os.path.join("runtime", "*", "dependencies", "node", "bin"),
+    os.path.join("*", "dependencies", "node", "bin"),
 )
 KIT_CLI_GLOBS = (
     os.path.join("app.asar.unpacked", "dsh", "node_modules", "@deepseek-ai",
@@ -159,10 +159,6 @@ def find_kit(node_arg: str | None, cli_arg: str | None) -> tuple[str | None, str
 
     if not node:
         node = shutil.which("node")
-    if not node:
-        # 最后兜底：DSH 的 Python 运行时与 node 装在同一个运行时目录里，路径
-        # 布局再变也不影响判断；用错的解释器跑 node 只会报一条清楚的错误。
-        node = sys.executable
     return node, cli
 
 

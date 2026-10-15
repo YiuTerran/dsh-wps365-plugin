@@ -159,7 +159,7 @@ CHANGELOG.md  RELEASING.md    # 版本变更与发布流程
 
 ## 更新记录
 
-- **未发布（Windows 实测修复）** — 在本机 Windows 上实测后修掉三处只在 Windows 暴露的问题：① 五个脚本用 `text=True` 读 CLI 输出，而它在中文 Windows 上按 cp936 解码、CLI 却写 UTF-8，读取线程一遇非 ASCII 就崩，调用方拿到 `stdout=None`（数据与错误信息一起丢）；现在统一走 `_wps_cli.run_cli()`，固定 UTF-8。② 脚本**自己**打印的 ✅/⚠️/↳ 同样过不了 cp936，而崩在最后一行最要命 —— 文件已经下载、校验、写好了，退出码却是 1；现在每个脚本启动时把 stdout/stderr 固定成 UTF-8。③ `xlsx_edit.py` 的 LibreOffice kit 探测只认识 macOS 的 `.app` 路径，Windows 上必然判成"找不到 kit"并静默跳过公式重算；现在两侧都按"应用资源目录 + 相对路径"探测，并退到 `DSH_HOME/dsh-runtimes/*` 与 `PATH`。另外把"名字是 .xlsx、内容是老式 .xls"的文件从 openpyxl 原始栈改成一句可照做的提示。测试新增 `test/scripts_test.py`（18 例，纯标准库）覆盖这三类问题，并修掉两个在 Windows 上必然失败的断言。
+- **0.1.2** — 包含 Windows 支持与修复：CLI 按平台发现、脚本统一使用 UTF-8 管道与输出，Windows 上可定位 LibreOffice kit 和 Node，并给伪装成 `.xlsx` 的 `.xls` 提供可操作提示。Python 侧测试现为 27 例。另修复并发写入未检测块顺序变化、默认配置漏查 `PATH`，以及 Node 缺失时误用 Python 解释器启动的问题；详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.1.1** — 修复一个**会导致 Harness 打不开**的严重问题。0.1.0 的手写 Config 上带了一个 `toJSON()` 方法，而 DSH 的 settings 服务用 `"toJSON" in schema` 这个鸭子类型挑选要渲染的 schema，选中后紧接着读 `schema.meta.volatile` —— 手写对象没有 `meta`，于是抛 `TypeError`，`settings/describe` 失败，桌面端 welcome RPC 报 `Web RPC failed`，窗口起不来。删掉 `toJSON()` 即可（`~standard.validate` 不受影响，配置校验照常），并加了回归测试锁住这个形状。同一版本起开始发布到 npm。
 - **0.1.0** — 首个版本：把 `wps365-docs` 技能打包成 DSH bundle。**请勿使用**，未发布到 npm。
 

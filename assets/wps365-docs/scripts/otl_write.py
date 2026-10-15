@@ -121,12 +121,23 @@ def verify_snapshot(cli: str, file_id: str, snap_path: str, mode: str, timeout: 
     new_full = {b["block_id"]: b["hash"] for b in new.get("blocks") or []}
     added, removed, changed = diff_maps(old_full, new_full)
 
+    old_order = [b["block_id"] for b in old.get("blocks") or []]
+    new_order = [b["block_id"] for b in new.get("blocks") or []]
+    new_ids = set(new_order)
+    old_ids = set(old_order)
+    old_shared_order = [bid for bid in old_order if bid in new_ids]
+    new_shared_order = [bid for bid in new_order if bid in old_ids]
+    order_changed = old_shared_order != new_shared_order
+    order_changed_ids = ([old_bid for old_bid, new_bid in
+                          zip(old_shared_order, new_shared_order) if old_bid != new_bid]
+                         if order_changed else [])
+
     scope = old.get("scope") or []
     explicit = bool(old.get("scope_explicit"))
     sc_changed = [i for i in scope if i in new_full and new_full[i] != old_full.get(i)]
     sc_gone = [i for i in scope if i not in new_full]
 
-    if not (added or removed or changed):
+    if not (added or removed or changed or order_changed):
         print(f"并发检查：文档未被改动（{len(new_full)} 个一级块，"
               f"version {old.get('version')}→{new.get('version')}）")
         return len(new_full)
@@ -134,14 +145,15 @@ def verify_snapshot(cli: str, file_id: str, snap_path: str, mode: str, timeout: 
     detail = "；".join(
         [f"{len(changed)} 个块内容变化"] * bool(changed)
         + [f"{len(removed)} 个块被删除"] * bool(removed)
-        + [f"{len(added)} 个块新增"] * bool(added))
+        + [f"{len(added)} 个块新增"] * bool(added)
+        + ["一级块顺序变化"] * bool(order_changed))
 
     if mode == "replace":
         conflict, why = True, "replace 会清空重写，按全文比对"
     elif explicit:
         conflict = bool(sc_changed or sc_gone)
         why = f"只比对声明的 {len(scope)} 个依赖块"
-    elif allow_added and not changed and not removed:
+    elif allow_added and not changed and not removed and not order_changed:
         conflict, why = False, "仅新增块，未改未删"
     else:
         conflict, why = True, "未声明依赖块，保守按全文比对"
@@ -153,7 +165,9 @@ def verify_snapshot(cli: str, file_id: str, snap_path: str, mode: str, timeout: 
         print(f"⚠️  已忽略冲突（--force）：{detail}")
         return len(new_full)
 
-    hit = (sc_changed + sc_gone) if (explicit and mode != "replace") else (changed + removed + added)
+    hit = ((sc_changed + sc_gone) if (explicit and mode != "replace")
+           else changed + removed + added + order_changed_ids)
+    hit = list(dict.fromkeys(hit))
     sys.exit("[otl_write] ⚠️  冲突：本次依赖的块已被他人修改，已放弃写入。\n"
              f"   判定：{why}\n"
              f"   文档整体：{detail}\n"
