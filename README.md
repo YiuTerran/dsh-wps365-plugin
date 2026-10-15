@@ -2,6 +2,8 @@
 
 给你的 DSH 装上 **WPS 365 云文档**能力。
 
+本仓库同时支持 DSH 插件和 Codex 本地插件适配，二者版本同步；安装方式分别说明。Codex 版本的源码与构建说明见 [`codex/`](codex/README.md)。
+
 装好之后不用再手动导出、复制粘贴：你可以直接让 agent 读一篇 WPS 智能文档、把内容写进云文档、改云端表格里的某个单元格，它都能真的去读写你的 WPS 365 文档 —— 包括别人通过分享链接给你的文档。
 
 > 插件本体只提供技能（`wps365-docs`）与配套脚本，**不含**任何 WPS 账号信息；所有云文档操作都由你自己安装的 `wps365-cli` 完成。
@@ -80,7 +82,37 @@ plugin_manager { action: "install_bundle", target: "@tryao/dsh-wps365-plugin" }
 plugin_manager { action: "remove_bundle", target: "@tryao/dsh-wps365-plugin" }
 ```
 
-> ⚠️ 请使用 **0.1.1 或更高版本**。0.1.0 有一个会让 Harness 打不开的严重问题，它从未发布到 npm；详见 [CHANGELOG.md](CHANGELOG.md)。
+> ⚠️ DSH 插件请使用 **0.1.1 或更高版本**。DSH 的 0.1.0 有一个会让 Harness 打不开的严重问题，它从未发布到 npm；详见 [CHANGELOG.md](CHANGELOG.md)。
+
+## 在 Codex 中使用
+
+Codex 版本由 `codex/` 中的源码构建，和上面的 DSH 插件分别安装。克隆仓库后，在仓库根目录构建并运行打包检查：
+
+```bash
+git clone https://github.com/YiuTerran/dsh-wps365-plugin.git
+cd dsh-wps365-plugin
+npm --prefix codex run build
+npm --prefix codex test
+```
+
+构建需要 Node.js 22 或更高版本；生成 `.tar.gz` 归档还需要系统提供 `tar` 命令。无需运行 `npm install`，构建和检查使用 Node.js 内置模块。构建会生成完整插件目录 `codex/dist/wps365-docs/` 和归档 `codex/dist/wps365-docs-0.1.2.tar.gz`。请把**构建生成的目录**注册并安装；`codex/wps365-docs/` 是源码，不含构建复制进去的共享 Python 脚本，不能直接作为完整插件安装。
+
+在 Codex 中可以这样请求安装：
+
+> 将当前仓库构建得到的 `codex/dist/wps365-docs` 注册到我的个人本地插件市场，并帮我安装。保留已有市场配置。
+
+Codex 的本地插件市场由本机配置发现，市场清单中的插件路径相对于市场根目录。安装到个人本地市场只对当前用户和设备生效，不会发布给其他用户；每位使用者都要安装并授权自己的 `wps365-cli`：
+
+```bash
+wps365-cli config init
+wps365-cli auth login --device
+```
+
+可参考 [Codex 官方插件构建说明](https://developers.openai.com/plugins/build/plugins)。如果安装后插件没有显示，重启 Codex 桌面应用；插件可用后新开一个聊天，再提出文档任务，例如：
+
+> 读取这篇 WPS 文档并概括重点：<分享链接或 file_id>
+
+Codex 使用本地执行环境运行 Python 脚本和 `wps365-cli`。处理 `.xlsx` 需要 `openpyxl`，用 `python-docx` 创建或处理 DOCX 需要 `python-docx`；有 Codex 提供的 `load_workspace_dependencies` 时可使用其中的 Python，否则本机需有相应 Python 依赖。Excel 编辑和公式重算使用当前可用的 Office 技能能力；Codex 版本不依赖 DSH 附带的 LibreOffice Kit。
 
 ## 配置（可选）
 
@@ -151,6 +183,7 @@ scripts/check-package.mjs     # 校验 npm 打包内容（CI 也会跑）
 scripts/clean-bytecode.mjs    # prepack：清掉跑脚本留下的 __pycache__
 .github/workflows/            # ci.yml 跑测试与打包检查；release.yml 打 tag 时发布 npm
 CHANGELOG.md  RELEASING.md    # 版本变更与发布流程
+codex/                        # Codex 本地插件适配；构建与安装说明见 codex/README.md
 ```
 
 技能正文里的路径统一写成 `{skillDir}` 占位符，加载时由插件注入真实绝对路径，所以同一份资源放在 profile bundle、工作区 bundle 或打包应用里都能用。

@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const CODEx_DIR = dirname(fileURLToPath(import.meta.url))
 const REPO_DIR = resolve(CODEx_DIR, '..')
+const ROOT_PACKAGE_VERSION = readJson(join(REPO_DIR, 'package.json'), 'root package.json').version
 const SOURCE_DIR = join(CODEx_DIR, 'wps365-docs')
 const CANONICAL_SCRIPTS_DIR = join(REPO_DIR, 'assets', 'wps365-docs', 'scripts')
 const DEFAULT_OUTPUT_DIR = join(CODEx_DIR, 'dist', 'wps365-docs')
@@ -57,7 +58,7 @@ function validateManifests(portable, legacy) {
   for (const [label, manifest] of [['plugin.json', portable], ['.codex-plugin/plugin.json', legacy]]) {
     assert(isObject(manifest), `${label} must contain a JSON object`)
     assert(manifest.name === 'wps365-docs', `${label} must have name "wps365-docs"`)
-    assert(manifest.version === '0.1.0', `${label} must have version "0.1.0"`)
+    assert(manifest.version === ROOT_PACKAGE_VERSION, `${label} version must match root package.json (${ROOT_PACKAGE_VERSION})`)
   }
 
   const extension = portable.extensions?.['com.openai']

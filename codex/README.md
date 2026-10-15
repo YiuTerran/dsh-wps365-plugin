@@ -20,7 +20,9 @@ Office 文件编辑依赖已安装的 documents、spreadsheets 或 presentations
 构建输出：
 
 - codex/dist/wps365-docs/：可检查的插件目录，包含 manifests、技能内容、参考资料、随包图标和从原始 assets/wps365-docs/scripts 复制的 Python 脚本。
-- codex/dist/wps365-docs-0.1.0.tar.gz：同一插件的归档包。
+- codex/dist/wps365-docs-0.1.2.tar.gz：同一插件的归档包。
+
+Codex 两份 manifest 的版本号跟随仓库根目录 `package.json`；后续发版时同步更新两份 manifest，构建会在版本不一致时失败。
 
 构建脚本只从原始 assets/wps365-docs/scripts 读取脚本，codex/ 源文件不会维护 Python 副本。源码目录为 codex/wps365-docs；生成内容集中在 codex/dist/。
 

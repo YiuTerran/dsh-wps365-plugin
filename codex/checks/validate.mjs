@@ -62,9 +62,10 @@ function assertPortableTree(root) {
 function assertManifestShape(root) {
   const portable = json(join(root, 'plugin.json'))
   const legacy = json(join(root, '.codex-plugin', 'plugin.json'))
+  const rootVersion = json(join(REPO_DIR, 'package.json')).version
   assert.equal(portable.name, 'wps365-docs')
   assert.equal(legacy.name, portable.name)
-  assert.equal(portable.version, '0.1.0')
+  assert.equal(portable.version, rootVersion)
   assert.equal(legacy.version, portable.version)
   assert.equal(portable.extensions?.['com.openai']?.requires_local_executor, true)
   assert.equal(legacy.requires_local_executor, true)

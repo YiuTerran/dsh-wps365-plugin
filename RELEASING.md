@@ -38,7 +38,7 @@ Package name triggered spam detection
 # 1. 确认干净且测试通过（含打包内容检查）
 npm test && npm run check:pack
 
-# 2. 改版本号（例如 0.1.1 → 0.1.2），同步更新 CHANGELOG.md 与两个 README 的「更新记录」
+# 2. 改版本号（例如 0.1.1 → 0.1.2），同步更新 CHANGELOG.md 与两个 README 的「更新记录」。Codex 插件的两份 manifest 也应使用根目录 `package.json` 的版本；构建会检查一致性。
 npm version patch --no-git-tag-version
 
 # 3. 提交并推送
