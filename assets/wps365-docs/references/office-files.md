@@ -59,7 +59,7 @@ PY
 {python} {skillDir}/scripts/xlsx_edit.py --drive-id <盘> --file-id <file_id> --set "数据!A1=x" --dry-run
 ```
 
-`--set` 按内容推断类型（`123`→数字、`true`→布尔、`=…`→公式、其余字符串）。重算依赖 LibreOffice kit，脚本会自动探测路径，也可用 `--lo-cli` / `--node` 或环境变量 `DSH_LIBREOFFICE_CLI` / `DSH_NODE` 指定；**找不到时会跳过并明确告警**，不会静默丢缓存值。
+`--set` 按内容推断类型（`123`→数字、`true`→布尔、`=…`→公式、其余字符串）。重算依赖 LibreOffice kit，脚本会自动探测：先看应用资源目录（macOS 的 `.app` 与 Windows 的 `resources\` 都按同一组相对路径拼），再在 `DSH_HOME` 的 `dsh-runtimes/*` 与 `PATH` 里找；也可用 `--lo-cli` / `--node` 或环境变量 `DSH_LIBREOFFICE_CLI` / `DSH_NODE` 显式指定；**找不到时会跳过并明确告警**，不会静默丢缓存值。
 
 实测一条龙（2026-10-14，本机）：新建的 xlsx 上传（v1，openpyxl 生成的公式**无缓存值**）→ `--set "数据!B2=99" --set "数据!D2==B2*C2*2" --set "说明!A2=脚本写入"` → 输出 `已重算：3 个公式，3 个有缓存值` → 上传 v2，回读得到 `=B2*C2*2 → 792`、`=SUM(D2:D3) → 804`，合并区 `A6:B6` 与 13 位大数字 `1234567890123` 均无损。**LibreOffice 重算在本机是可用的**（不是跳过路径）。
 

@@ -37,24 +37,23 @@ import argparse
 import hashlib
 import json
 import os
-import subprocess
 import sys
 import urllib.request
 
 from _wps_cli import resolve as _resolve_cli
+from _wps_cli import run_cli as _run_cli
+from _wps_cli import use_utf8_stdio as _use_utf8_stdio
 
 DEFAULT_CLI = _resolve_cli()
+_LABEL = "file_write"
+_use_utf8_stdio()
 UA = {"User-Agent": "Mozilla/5.0"}
 
 
 # ---------------------------------------------------------------- CLI 封装
 
 def run(cmd: list[str], timeout: int, what: str) -> str:
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip()[:600]
-        sys.exit(f"[file_write] {what} 失败（退出码 {proc.returncode}）：{detail}")
-    return proc.stdout
+    return _run_cli(cmd, timeout, _LABEL, what)
 
 
 def api(cli: str, method: str, path: str, timeout: int, data: dict | None = None,

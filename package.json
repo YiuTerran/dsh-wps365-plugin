@@ -50,7 +50,7 @@
     "access": "public"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --test && python3 test/scripts_test.py",
     "check:pack": "node scripts/check-package.mjs",
     "prepack": "node scripts/clean-bytecode.mjs"
   },

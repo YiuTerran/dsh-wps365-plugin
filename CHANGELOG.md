@@ -16,7 +16,17 @@
 
 ### 修复
 
+- **中文 Windows 上 CLI 的输出会被整段丢掉**。五个脚本都用 `subprocess.run(..., text=True)` 读 CLI 输出，而 `text=True` 用的是*区域设置*编码：中文 Windows 上是 cp936，CLI 却永远写 UTF-8。于是读取线程在第一个非 ASCII 字节上抛 `UnicodeDecodeError`，调用方拿到的是 `stdout is None` —— 既不是数据、也不是错误信息（实测本机 9 条命令里 2 条整段丢失：`--help`、`drive --help`；凡响应里带中文文件名/错误文案的都会中招）。现在统一走 `_wps_cli.run_cli()`，固定 `encoding="utf-8", errors="replace"`，并把 `stdout` 兜底成空串，不会再出现 `None.strip()` 之类的次生崩溃。四个调 CLI 的脚本改为共用这一个封装，不再各自复制粘贴。
+- **Windows 上有公式的 `.xlsx` 会静默跳过重算**。`xlsx_edit.py` 的 kit 探测只认识 macOS 的 `.app` 路径，`shutil.which("node")` 在 DSH 的 shell 里也找不到 node，于是 `find_kit()` 两个返回值都是 `None`，脚本按"找不到 kit"跳过重算 —— 上传的表格公式缓存值是空的，下游按值读会拿到空。现在按"应用资源目录 + 相对路径"在 macOS 与 Windows 两侧拼路径（`resources\` 下的 `app.asar.unpacked\...\libreoffice-kit` 与 `runtime\primary-runtime\dependencies\node` 都能命中），再退到 `DSH_HOME/dsh-runtimes/*`、`PATH`；Windows 上按 `PATHEXT` 拼 `node.exe`。实测本机 `find_kit()` 已能定位二者，`recalculate` 把 `=SUM(A1:A2)` 的缓存值算成了 5。
+
+- **脚本自己打印的 ✅/⚠️/↳ 会在中文 Windows 上把脚本打死**。上一处是"读进来"的编码，这一处是"写出去"的：`sys.stdout` 在中文 Windows 上是 cp936，而五个脚本的汇总行里有 ✅、⚠️、↳、• 这类字符，`print()` 直接抛 `UnicodeEncodeError`。最坏的位置是**最后一行** —— 实测 `file_fetch.py` 已经把文件下载完、校验完、`doc.md` 也写好了，却在打印"✅ 一致"时崩掉并返回退出码 1，模型只会看到"失败"而不知道产物其实都在。现在每个脚本启动时调 `_wps_cli.use_utf8_stdio()`，把自身 stdout/stderr 固定成 UTF-8 + `errors="replace"`（仓库里 5 个脚本、共 13 个 cp936 编不出来的字符，逐个删字符治不了根）。
+- **把 `.xls` 改名成 `.xlsx` 的文件会让 `file_fetch.py` 抛原始栈**。云盘上很常见（实测用户盘里就有一个 267 KB 的）：openpyxl 抛 `BadZipFile: File is not a zip file`，模型看到的是 openpyxl 的调用栈，既不知道原因也不知道下一步。现在按魔数（OLE2 `d0cf11e0a1b11ae1`）先判断，给出"名字是 .xlsx、内容是老式 .xls，请另存为 .xlsx；只想取值可加 `--via-api`"的提示。
 - **发布产物不再可能夹带 Python 字节码**：跑过任一脚本后会在 `assets/wps365-docs/scripts/` 留下 `__pycache__`，而 `files` 白名单包含整个 `assets/`，所以从"刚跑过脚本"的工作树发布就会把它带上（曾发生过一次，52 KiB）。现在 `prepack` 会在打包前清理，`npm run check:pack` 也会在字节码从别的路径混进来时直接失败。
+
+### 测试
+
+- 新增 `test/scripts_test.py`（18 例，纯标准库，`python3` 即可跑）：覆盖 `_wps_cli` 的默认路径拼写、`PATHEXT` 式裸名回退、显式路径不被悄悄替换；**管道必须按 UTF-8 解码**（含"输出解不出来时不能把 `None` 交给调用方"）；**子进程在 `PYTHONIOENCODING=gbk` 下打印 ✅ 不能失败**，且五个脚本都做了 stdio 引导；kit 探测用临时目录搭出 Windows 布局；OLE2 假 `.xlsx` 必须给出可照做的提示。`npm test` 现在连它一起跑。
+- 修掉两个在 Windows 上必然失败的断言（`ASSET_DIR` 只去掉 `/` 尾分隔符、期望 `/scripts/`）——它们是测试里的 POSIX 假设，不是实现缺陷；现在按本机实际分隔符断言，同时保留"不得出现重复分隔符"的检查。
 
 ## [0.1.1] - 2026-10-14
 

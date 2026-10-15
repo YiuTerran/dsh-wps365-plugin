@@ -14,12 +14,15 @@ import argparse
 import hashlib
 import json
 import os
-import subprocess
 import sys
 
 from _wps_cli import resolve as _resolve_cli
+from _wps_cli import run_cli as _run_cli
+from _wps_cli import use_utf8_stdio as _use_utf8_stdio
 
 DEFAULT_CLI = _resolve_cli()
+_LABEL = "otl_write"
+_use_utf8_stdio()
 MAX_BLOCKS_PER_CALL = 1000  # 服务端限制：doc_children.children 单次 ≤1000
 
 
@@ -29,12 +32,9 @@ def api(cli: str, method: str, path: str, data: dict | None, timeout: int) -> di
     cmd = [cli, "api", method, path, "-o", "json", "--timeout", f"{timeout}s"]
     if data is not None:
         cmd += ["--data", json.dumps(data, ensure_ascii=False)]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip()[:600]
-        sys.exit(f"[otl_write] {method.upper()} {path} 失败（退出码 {proc.returncode}）：{detail}")
+    stdout = _run_cli(cmd, timeout, _LABEL, f"{method.upper()} {path}")
     try:
-        payload = json.loads(proc.stdout)
+        payload = json.loads(stdout)
     except json.JSONDecodeError as exc:
         sys.exit(f"[otl_write] {method.upper()} {path} 返回不是 JSON：{exc}")
     if payload.get("code") not in (0, None):

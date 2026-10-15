@@ -17,14 +17,17 @@ import argparse
 import base64
 import json
 import os
-import subprocess
 import sys
 import urllib.request
 from collections import Counter
 
 from _wps_cli import resolve as _resolve_cli
+from _wps_cli import run_cli as _run_cli
+from _wps_cli import use_utf8_stdio as _use_utf8_stdio
 
 DEFAULT_CLI = _resolve_cli()
+_LABEL = "otl_fetch"
+_use_utf8_stdio()
 UA = {"User-Agent": "Mozilla/5.0"}
 
 # 导出模型里 codeBlock 的 lang 是编辑器内部数字枚举，与 blocks API 的字符串枚举
@@ -38,12 +41,9 @@ CODE_LANG = {25: "bash"}
 def run_export(cli: str, file_id: str, timeout: int) -> dict:
     """调用 CLI 导出 JSON（一次调用直接返回内容，无需轮询任务）。"""
     cmd = [cli, "airpage", "export", "create", file_id, "--format", "json", "-o", "json"]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip()[:600]
-        sys.exit(f"[otl_fetch] 导出失败（退出码 {proc.returncode}）：{detail}")
+    stdout = _run_cli(cmd, timeout, _LABEL, "导出")
     try:
-        return json.loads(proc.stdout)
+        return json.loads(stdout)
     except json.JSONDecodeError as exc:
         sys.exit(f"[otl_fetch] 导出结果不是 JSON：{exc}")
 

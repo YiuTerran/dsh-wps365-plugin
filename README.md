@@ -123,10 +123,13 @@ plugin_manager { action: "remove_bundle", target: "@tryao/dsh-wps365-plugin" }
 离线自查（不需要 Harness、不需要联网、不会碰你的云文档）：
 
 ```bash
-node --test          # 30 个用例：技能解析/资源预算、bundle 与补丁结构、apply() 契约、配置校验
+node --test                        # Node 侧用例：技能解析/资源预算、bundle 与补丁结构、apply() 契约、配置校验、CLI 定位
+python3 test/scripts_test.py       # Python 侧用例：CLI 定位、管道解码、LibreOffice kit 探测（纯标准库）
 node --check index.js
 python3 -m py_compile assets/wps365-docs/scripts/*.py
 ```
+
+`npm test` 会依次跑前两条；CI 在 Linux 上跑（Windows 语义由注入的假环境覆盖，不依赖真机）。
 
 真实验证：让 agent 读一篇你确定有权限的文档，问它"这篇文档的标题是什么、有几个表格"，确认拿到的是真实内容；再让它用 `--dry-run` 写一次（只做转换、不写入、不产生文件），看块结构与比对输出是否符合预期，然后才动真文档。
 
@@ -136,13 +139,16 @@ python3 -m py_compile assets/wps365-docs/scripts/*.py
 index.js                      # Host 插件：向 ctx.skills 注册 wps365-docs
 src/plugin-config.js          # 配置校验（手写 Standard Schema v1，零依赖）
 src/skill-catalog.js          # 纯函数：解析技能 frontmatter、构造 catalog entry、渲染本机资源块
+src/cli-locate.js             # 纯函数：跨平台定位 wps365-cli（PATHEXT、PATH、~ / %VAR% 展开）
 cordis.patch.yml              # bundle patch：插入 skill-wps365-docs 行
 assets/wps365-docs/
 ├── SKILL.md                  # 常驻正文（约 3.4k 字符，控制在 8192 的修剪阈值内）
 ├── references/               # otl.md / office-files.md / concurrency.md，按需读取
 └── scripts/                  # otl_fetch.py otl_write.py file_fetch.py file_write.py xlsx_edit.py
-locale/{en,zh}.json  icon.svg  test/
+                              # _wps_cli.py：五个脚本共用的 CLI 定位 + UTF-8 管道封装
+locale/{en,zh}.json  icon.svg  test/   # test/scripts_test.py 是 Python 侧用例，npm test 会跑
 scripts/check-package.mjs     # 校验 npm 打包内容（CI 也会跑）
+scripts/clean-bytecode.mjs    # prepack：清掉跑脚本留下的 __pycache__
 .github/workflows/            # ci.yml 跑测试与打包检查；release.yml 打 tag 时发布 npm
 CHANGELOG.md  RELEASING.md    # 版本变更与发布流程
 ```
@@ -153,6 +159,7 @@ CHANGELOG.md  RELEASING.md    # 版本变更与发布流程
 
 ## 更新记录
 
+- **未发布（Windows 实测修复）** — 在本机 Windows 上实测后修掉三处只在 Windows 暴露的问题：① 五个脚本用 `text=True` 读 CLI 输出，而它在中文 Windows 上按 cp936 解码、CLI 却写 UTF-8，读取线程一遇非 ASCII 就崩，调用方拿到 `stdout=None`（数据与错误信息一起丢）；现在统一走 `_wps_cli.run_cli()`，固定 UTF-8。② 脚本**自己**打印的 ✅/⚠️/↳ 同样过不了 cp936，而崩在最后一行最要命 —— 文件已经下载、校验、写好了，退出码却是 1；现在每个脚本启动时把 stdout/stderr 固定成 UTF-8。③ `xlsx_edit.py` 的 LibreOffice kit 探测只认识 macOS 的 `.app` 路径，Windows 上必然判成"找不到 kit"并静默跳过公式重算；现在两侧都按"应用资源目录 + 相对路径"探测，并退到 `DSH_HOME/dsh-runtimes/*` 与 `PATH`。另外把"名字是 .xlsx、内容是老式 .xls"的文件从 openpyxl 原始栈改成一句可照做的提示。测试新增 `test/scripts_test.py`（18 例，纯标准库）覆盖这三类问题，并修掉两个在 Windows 上必然失败的断言。
 - **0.1.1** — 修复一个**会导致 Harness 打不开**的严重问题。0.1.0 的手写 Config 上带了一个 `toJSON()` 方法，而 DSH 的 settings 服务用 `"toJSON" in schema` 这个鸭子类型挑选要渲染的 schema，选中后紧接着读 `schema.meta.volatile` —— 手写对象没有 `meta`，于是抛 `TypeError`，`settings/describe` 失败，桌面端 welcome RPC 报 `Web RPC failed`，窗口起不来。删掉 `toJSON()` 即可（`~standard.validate` 不受影响，配置校验照常），并加了回归测试锁住这个形状。同一版本起开始发布到 npm。
 - **0.1.0** — 首个版本：把 `wps365-docs` 技能打包成 DSH bundle。**请勿使用**，未发布到 npm。
 

@@ -36,36 +36,160 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import file_fetch  # noqa: E402  下载 + 元数据
 import file_write  # noqa: E402  三步上传 + 备份
+from _wps_cli import CLI_ENCODING  # noqa: E402  管道一律按 UTF-8 解码
+from _wps_cli import use_utf8_stdio as _use_utf8_stdio  # noqa: E402
 
-NODE_CANDIDATES = [
-    "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/primary-runtime/"
-    "dependencies/node/bin/node",
+_use_utf8_stdio()
+
+#: DSH application bundles, by platform. The kit ships *inside* the application
+#: on every platform, so the anchor is the app resource directory, not a
+#: fixed POSIX path; the environment overrides below cover portable installs.
+APP_RESOURCE_CANDIDATES = [
+    "/Applications/DeepSeek Harness.app/Contents/Resources",
 ]
-LO_CLI_CANDIDATES = [
-    "/Applications/DeepSeek Harness.app/Contents/Resources/app.asar.unpacked/dsh/"
-    "node_modules/@deepseek-ai/libreoffice-kit/lib/cli.js",
-]
+if os.name == "nt":
+    for _var in ("LOCALAPPDATA", "APPDATA", "ProgramFiles", "ProgramFiles(x86)"):
+        _base = os.environ.get(_var)
+        if _base:
+            APP_RESOURCE_CANDIDATES.append(
+                os.path.join(_base, "Programs", "DeepSeek Harness", "resources"))
+            APP_RESOURCE_CANDIDATES.append(
+                os.path.join(_base, "DeepSeek Harness", "resources"))
+else:
+    APP_RESOURCE_CANDIDATES += [
+        os.path.expanduser("~/.local/share/deepseek-harness/resources"),
+        "/opt/DeepSeek Harness/resources",
+        "/usr/lib/deepseek-harness/resources",
+    ]
+_dsh_home = os.environ.get("DSH_HOME")
+if _dsh_home:
+    APP_RESOURCE_CANDIDATES.append(os.path.join(_dsh_home, "resources"))
+
+#: Paths inside an app resource directory. Packaged apps unpack the kit next to
+#: `app.asar`; a source checkout keeps it under `dsh/node_modules`.
+KIT_NODE_RELATIVE = ("runtime", "primary-runtime", "dependencies", "node", "bin", "node")
+KIT_CLI_RELATIVE = ("app.asar.unpacked", "dsh", "node_modules", "@deepseek-ai",
+                    "libreoffice-kit", "lib", "cli.js")
+
+#: Fallback searches, so a layout change turns into "found it elsewhere"
+#: instead of "LibreOffice is unavailable". Relative to a search root, which is
+#: either the app directory or `DshHome`.
+KIT_NODE_GLOBS = (
+    os.path.join("dependencies", "node", "bin", "node"),
+    os.path.join("runtime", "*", "dependencies", "node", "bin", "node"),
+    os.path.join("*", "dependencies", "node", "bin", "node"),
+)
+KIT_CLI_GLOBS = (
+    os.path.join("app.asar.unpacked", "dsh", "node_modules", "@deepseek-ai",
+                 "libreoffice-kit", "lib", "cli.js"),
+    os.path.join("dsh", "node_modules", "@deepseek-ai", "libreoffice-kit", "lib", "cli.js"),
+)
 
 
 # ---------------------------------------------------------------- LibreOffice kit
 
+def _search_roots() -> list[str]:
+    """Directories that may hold a DSH application bundle, best guess first."""
+    roots = [os.environ.get("DSH_APP_ROOT"), os.environ.get("DSH_RESOURCES")]
+    roots += [os.path.dirname(path) for path in _runtimes()]
+    roots += APP_RESOURCE_CANDIDATES
+    # …/<app>/dsh/assets/wps365-docs/scripts → four levels up is the app root of
+    # a source checkout; five levels up covers the packaged layout.
+    here = os.path.dirname(os.path.abspath(__file__))
+    roots.append(os.path.abspath(os.path.join(here, *([os.pardir] * 4))))
+    roots.append(os.path.abspath(os.path.join(here, *([os.pardir] * 5))))
+    return [root for root in dict.fromkeys(roots) if root and os.path.isdir(root)]
+
+
+def _dsh_home() -> str:
+    """The DSH home directory, from the environment or the platform default."""
+    home = os.environ.get("DSH_HOME")
+    return os.path.expanduser(home) if home else os.path.join(os.path.expanduser("~"), ".dsh")
+
+
+def _runtimes() -> list[str]:
+    """Every installed runtime directory under `DshHome/dsh-runtimes`."""
+    runtimes = os.path.join(_dsh_home(), "dsh-runtimes")
+    try:
+        return [os.path.join(runtimes, name) for name in sorted(os.listdir(runtimes))]
+    except OSError:
+        return []
+
+
 def find_kit(node_arg: str | None, cli_arg: str | None) -> tuple[str | None, str | None]:
-    """定位 LibreOffice kit。优先级：显式参数 → 环境变量 → 已知路径 → PATH。"""
-    node = (node_arg or os.environ.get("DSH_NODE")
-            or next((p for p in NODE_CANDIDATES if os.path.exists(p)), None)
-            or shutil.which("node"))
-    cli = (cli_arg or os.environ.get("DSH_LIBREOFFICE_CLI")
-           or next((p for p in LO_CLI_CANDIDATES if os.path.exists(p)), None))
-    if not cli:  # 兜底：在应用资源里搜一层
-        hits = glob.glob("/Applications/DeepSeek Harness.app/Contents/Resources/"
-                         "**/libreoffice-kit/lib/cli.js", recursive=True)
-        cli = hits[0] if hits else None
+    """定位 LibreOffice kit。优先级：显式参数 → 环境变量 → 已知路径 → PATH。
+
+    应用自带的 kit 在 macOS 上藏在 .app 里，在 Windows 上藏在 resources\\ 下，
+    所以两端都按「应用资源目录 + 相对路径」拼；相对路径找不到时再按通配搜一层，
+    布局变了也只是"换个地方找到"，而不是报"LibreOffice 不可用"。
+    """
+    node = node_arg or os.environ.get("DSH_NODE")
+    cli = cli_arg or os.environ.get("DSH_LIBREOFFICE_CLI")
+    roots = _search_roots()
+
+    if not node:
+        for root in roots:
+            for leaf in _node_spellings():
+                candidate = os.path.join(root, *KIT_NODE_RELATIVE[:-1], leaf)
+                if os.path.isfile(candidate):
+                    node = candidate
+                    break
+            if node:
+                break
+    if not cli:
+        for root in roots:
+            candidate = os.path.join(root, *KIT_CLI_RELATIVE)
+            if os.path.isfile(candidate):
+                cli = candidate
+                break
+
+    # 通配兜底：上面的相对路径对不上时（打包方式变了），照样能找到 kit。
+    # DshHome 下的运行时目录（`dsh-runtimes/<name>/`）既是 node 的家，也放着
+    # 应用资源，所以它先于其它 root 被搜。
+    if not node or not cli:
+        for base in dict.fromkeys([_dsh_home(), *_runtimes(), *roots]):
+            if not cli:
+                cli = _first_glob(base, KIT_CLI_GLOBS)
+            if not node:
+                node = _first_glob(base, tuple(
+                    os.path.join(pattern, leaf)
+                    for pattern in KIT_NODE_GLOBS for leaf in _node_spellings()))
+            if node and cli:
+                break
+
+    if not node:
+        node = shutil.which("node")
+    if not node:
+        # 最后兜底：DSH 的 Python 运行时与 node 装在同一个运行时目录里，路径
+        # 布局再变也不影响判断；用错的解释器跑 node 只会报一条清楚的错误。
+        node = sys.executable
     return node, cli
+
+
+def _node_spellings() -> list[str]:
+    """File names `node` may have on this platform (`node`, `node.exe`)."""
+    if os.name != "nt":
+        return ["node"]
+    declared = (os.environ.get("PATHEXT") or ".EXE;.CMD;.BAT").split(";")
+    return ["node"] + [f"node{ext.strip().lower()}" for ext in declared if ext.strip()]
+
+
+def _first_glob(base: str, patterns: tuple[str, ...]) -> str | None:
+    """First existing match for any pattern, searched relative to `base`."""
+    for pattern in patterns:
+        try:
+            hits = glob.glob(os.path.join(base, pattern))
+        except OSError:
+            continue
+        if hits:
+            return hits[0]
+    return None
 
 
 def recalculate(node: str, cli: str, src: str, dst: str, timeout: int) -> None:
     cmd = [node, cli, "recalculate", "--input", src, "--output", dst]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                          encoding=CLI_ENCODING, errors="replace")
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()[:400]
         sys.exit(f"[xlsx_edit] 重算失败（退出码 {proc.returncode}）：{detail}")

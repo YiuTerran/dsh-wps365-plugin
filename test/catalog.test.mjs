@@ -26,8 +26,14 @@ import {
 } from '../src/skill-catalog.js'
 
 const ASSET_ROOT = fileURLToPath(new URL('../assets/wps365-docs/', import.meta.url))
-/** The same directory without the URL's trailing separator, as the hint renders it. */
-const ASSET_DIR = ASSET_ROOT.replace(/\/+$/, '')
+/**
+ * The same directory without the URL's trailing separator, as the hint renders
+ * it. The separator is platform-dependent (`\` on Windows) and `fileURLToPath`
+ * can leave either kind behind, so both are stripped.
+ */
+const ASSET_DIR = ASSET_ROOT.replace(/[\\/]+$/, '')
+/** Separator the hint must use for this asset root, on this platform. */
+const ASSET_SEP = ASSET_DIR.includes('\\') ? '\\' : '/'
 const SKILL_PATH = fileURLToPath(new URL('../assets/wps365-docs/SKILL.md', import.meta.url))
 
 test('SKILL.md parses into the advertised name and description', () => {
@@ -113,9 +119,12 @@ test('the rank matches the bundled layer, so a user copy still wins', () => {
 })
 
 test('buildRuntimeHint reports a present CLI', () => {
-  const hint = buildRuntimeHint({ skillDir: ASSET_ROOT, cli: '/opt/wps365-cli', cliExists: true, platform: 'linux' })
+  // No explicit platform: the hint must render for the machine running the test,
+  // which is what the plugin does at activation.
+  const hint = buildRuntimeHint({ skillDir: ASSET_ROOT, cli: '/opt/wps365-cli', cliExists: true })
   assert.ok(hint.includes(`\`{skillDir}\` = \`${ASSET_DIR}\``))
-  assert.ok(hint.includes(`\`${ASSET_DIR}/scripts/\``), 'the scripts directory must have no doubled separator')
+  assert.ok(hint.includes(`\`${ASSET_DIR}${ASSET_SEP}scripts${ASSET_SEP}\``),
+    'the scripts directory must have no doubled separator')
   // URLs legitimately contain "//"; the paths this block injects must not.
   for (const line of hint.split('\n')) {
     if (line.includes('http')) continue

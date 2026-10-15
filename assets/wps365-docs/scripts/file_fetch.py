@@ -30,13 +30,16 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import sys
 import urllib.request
 
 from _wps_cli import resolve as _resolve_cli
+from _wps_cli import run_cli as _run_cli
+from _wps_cli import use_utf8_stdio as _use_utf8_stdio
 
 DEFAULT_CLI = _resolve_cli()
+_LABEL = "file_fetch"
+_use_utf8_stdio()
 UA = {"User-Agent": "Mozilla/5.0"}
 SHEET_ROWS_PER_CALL = 100  # sheets 接口按行分块，避免单次响应过大
 
@@ -44,11 +47,7 @@ SHEET_ROWS_PER_CALL = 100  # sheets 接口按行分块，避免单次响应过�
 # ---------------------------------------------------------------- CLI 封装
 
 def run(cmd: list[str], timeout: int, what: str) -> str:
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip()[:600]
-        sys.exit(f"[file_fetch] {what} 失败（退出码 {proc.returncode}）：{detail}")
-    return proc.stdout
+    return _run_cli(cmd, timeout, _LABEL, what)
 
 
 def api(cli: str, method: str, path: str, timeout: int,
@@ -161,6 +160,16 @@ def xlsx_read_local(path: str, out_dir: str, max_rows: int, max_cols: int,
     except ImportError:
         sys.exit("[file_fetch] 本地解析 .xlsx 需要 openpyxl。请用工作区自带的 Python 运行"
                  "（load_workspace_dependencies 给出的可执行文件），或加 --via-api 改走 sheets 接口。")
+
+    # 扩展名会骗人：云盘上带 .xlsx 名字的老式 .xls（OLE2 复合文档）并不少见，
+    # openpyxl 会抛一句"File is not a zip file"让人摸不着头脑。这里先按魔数判断，
+    # 给一条能直接照做的提示，而不是让异常栈直接冒到模型面前。
+    with open(path, "rb") as fh:
+        magic = fh.read(8)
+    if magic == bytes.fromhex("d0cf11e0a1b11ae1"):
+        sys.exit(f"[file_fetch] {os.path.basename(path)} 的名字是 .xlsx，内容却是老式 .xls"
+                 "（OLE2 复合文档），openpyxl 打不开。请让用户另存为 .xlsx 后重试；"
+                 "只想拿单元格值可以加 --via-api 走 sheets 接口（代价是拿不到公式原文）。")
 
     wb = load_workbook(path, data_only=False)      # 公式原文
     wbv = load_workbook(path, data_only=True)      # 缓存计算值
