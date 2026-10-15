@@ -273,6 +273,88 @@ def count_formulas(path: str) -> tuple[int, int]:
     return total, cached
 
 
+# ---------------------------------------------------------------- 读回验证
+
+def literal_expectations(sets: list[str]) -> list[tuple[str, str, str]]:
+    """从 `--set` 里挑出能用 sheets 接口核对的字面值：(表名, A1 坐标, 期望值)。
+
+    公式（`=...`）排除在外：sheets 接口只回计算结果、拿不到公式原文，核对不了
+    "我写进去的是不是那个公式"。
+    """
+    expectations: list[tuple[str, str, str]] = []
+    for spec in sets:
+        coord, sep, raw = spec.partition("=")
+        if not sep or raw.lstrip().startswith("="):
+            continue
+        sheet_name, _, cell = coord.rpartition("!")
+        if not sheet_name or not cell:
+            continue
+        expectations.append((sheet_name, cell.strip().upper(), raw))
+    return expectations
+
+
+def cell_indices(cell: str) -> tuple[int, int]:
+    """A1 坐标 → (0-based 行, 0-based 列)，与 sheets 接口的 row_from/col_from 一致。"""
+    letters = "".join(ch for ch in cell if ch.isalpha()).upper()
+    digits = "".join(ch for ch in cell if ch.isdigit())
+    if not letters or not digits:
+        raise ValueError(f"无法解析单元格坐标：{cell!r}")
+    column = 0
+    for ch in letters:
+        column = column * 26 + (ord(ch) - ord("A") + 1)
+    return int(digits) - 1, column - 1
+
+
+def same_literal(expected: str, actual) -> bool:
+    """宽容比较云端读回值：类型与格式可能与本地写法不同（99 / '99' / 99.0）。"""
+    want = expected.strip().strip('"')
+    if actual is None:
+        return want == ""
+    have = str(actual).strip()
+    if want == have:
+        return True
+    try:
+        return float(want) == float(have)
+    except ValueError:
+        return False
+
+
+def verify_adopted(cli: str, file_id: str, expectations: list[tuple[str, str, str]],
+                   timeout: int) -> list[str]:
+    """把 `--set` 写过的字面值单元格读回来，返回对不上的那些。
+
+    为什么非查不可：**字节覆盖对「在线表格」不生效** —— 版本号与字节都变了，服务端
+    内容模型却仍是旧的。2026-10-15 实测：把 B1 从 1 改成 42 后按字节上传，
+    `version` 1→2 且云端字节与本机一致，但 sheets 接口读回仍是 1。只信版本号自增
+    会把这种情况当成成功（那位同学的原话：「version 增加了，看着像成功」）。
+    """
+    if not expectations:
+        return []
+    sheets = file_fetch.api(cli, "get", f"/v7/sheets/{file_id}/worksheets", timeout).get("sheets") or []
+    ids = {sheet.get("name"): sheet.get("sheet_id") for sheet in sheets}
+    problems: list[str] = []
+    for sheet_name, cell, expected in expectations:
+        sid = ids.get(sheet_name)
+        if sid is None:
+            problems.append(f"{sheet_name}!{cell}：云端没有这张工作表（改动未被采纳）")
+            continue
+        row, col = cell_indices(cell)
+        data = file_fetch.api(cli, "get", f"/v7/sheets/{file_id}/worksheets/{sid}/range_data",
+                              timeout, query={"row_from": row, "row_to": row,
+                                              "col_from": col, "col_to": col})
+        found = False
+        actual = None
+        for item in data.get("range_data") or []:
+            if item.get("row_from") == row and item.get("col_from") == col:
+                found = True
+                actual = item.get("original_cell_value")
+                if actual in (None, ""):
+                    actual = item.get("cell_text")
+        if not found or not same_literal(expected, actual):
+            problems.append(f"{sheet_name}!{cell}：期望 {expected!r}，云端读回 {actual!r}")
+    return problems
+
+
 # ---------------------------------------------------------------- 主流程
 
 def main() -> None:
@@ -359,6 +441,26 @@ def main() -> None:
         print(f"   已备份当前版本到 {dest}")
     file_write.upload(args.cli, args.drive_id, meta.get("parent_id") or "0", args.file_id,
                       name, path, None, args.timeout, "delegated", False)
+
+    # 5. 读回验证。字节覆盖对「在线表格」不生效，而它失败得很像成功（版本号照样自增），
+    #    所以只信自己读回来的值；读不回一致就明确失败，别让调用方以为改完了。
+    expectations = literal_expectations(args.set)
+    if not expectations:
+        print("⑤ 跳过读回验证：本次改动都是公式或来自 --py —— "
+              "sheets 接口读不到公式原文，且 --py 改了什么脚本无从得知")
+        return
+    print(f"⑤ 读回验证 {len(expectations)} 个用 --set 写的字面值单元格…")
+    problems = verify_adopted(args.cli, args.file_id, expectations, args.timeout)
+    if problems:
+        print("[xlsx_edit] ⚠️ 上传成功，但云端没有采纳这些改动：")
+        for item in problems:
+            print(f"   · {item}")
+        print("   原因：这个文件有服务端内容模型（在线表格）。字节覆盖只对「纯字节文件」生效 ——"
+              " 版本号会增加、字节也确实是你的，但在线内容仍是旧的。")
+        print("   下一步：改用单元格/公式接口改（见 references/office-files.md 的 .xlsx 接口写入一节），"
+              "或让用户在线手动粘贴；**不要**当成已成功。")
+        sys.exit(1)
+    print(f"   ✅ {len(expectations)} 个单元格读回一致")
 
 
 if __name__ == "__main__":

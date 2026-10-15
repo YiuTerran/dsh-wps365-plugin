@@ -351,5 +351,61 @@ class VerifySnapshotTest(unittest.TestCase):
         self.assertIn("一级块顺序变化", output)
 
 
+class XlsxReadbackTest(unittest.TestCase):
+    """字节覆盖对「在线表格」不生效，所以写完必须读回来核对。
+
+    2026-10-15 实测：B1 从 1 改成 42 后按字节上传，version 1→2 且云端字节与本机
+    一致，但 sheets 接口读回仍是 1 —— 只看版本号会把这种假成功当成功。
+    """
+
+    def test_literal_expectations_skip_formulas_and_foreign_entries(self):
+        got = xlsx_edit.literal_expectations(
+            ["数据!B2=99", "数据!D2==B2*C2", "说明!A2=脚本写入", "没有感叹号=1", "数据!B3="])
+        self.assertEqual(got, [("数据", "B2", "99"), ("说明", "A2", "脚本写入"), ("数据", "B3", "")])
+
+    def test_cell_indices_follow_the_sheets_api(self):
+        self.assertEqual(xlsx_edit.cell_indices("A1"), (0, 0))
+        self.assertEqual(xlsx_edit.cell_indices("B10"), (9, 1))
+        self.assertEqual(xlsx_edit.cell_indices("aa3"), (2, 26))
+        with self.assertRaises(ValueError):
+            xlsx_edit.cell_indices("12")
+
+    def test_same_literal_tolerates_type_and_format(self):
+        for actual in (99, "99", 99.0, " 99 "):
+            self.assertTrue(xlsx_edit.same_literal("99", actual), actual)
+        self.assertTrue(xlsx_edit.same_literal('"你好"', "你好"))
+        self.assertTrue(xlsx_edit.same_literal("", None))
+        self.assertFalse(xlsx_edit.same_literal("99", 1))
+        self.assertFalse(xlsx_edit.same_literal("42", None))
+
+    def _adopted(self, side_effect, expectations):
+        with mock.patch.object(file_fetch, "api", side_effect=side_effect):
+            return xlsx_edit.verify_adopted("cli", "file-id", expectations, 5)
+
+    def test_reports_a_cell_the_cloud_never_adopted(self):
+        sheets = {"sheets": [{"sheet_id": 1, "name": "数据"}]}
+        stale = {"range_data": [{"row_from": 1, "col_from": 1, "original_cell_value": 1}]}
+        problems = self._adopted([sheets, stale], [("数据", "B2", "42")])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("期望 '42'", problems[0])
+        self.assertIn("云端读回 1", problems[0])
+
+    def test_accepts_a_cell_the_cloud_adopted(self):
+        sheets = {"sheets": [{"sheet_id": 1, "name": "数据"}]}
+        fresh = {"range_data": [{"row_from": 1, "col_from": 1, "original_cell_value": 42}]}
+        self.assertEqual(self._adopted([sheets, fresh], [("数据", "B2", "42")]), [])
+
+    def test_flags_a_sheet_the_cloud_does_not_have(self):
+        problems = self._adopted([{"sheets": [{"sheet_id": 1, "name": "别的表"}]}],
+                                 [("数据", "B2", "42")])
+        self.assertIn("云端没有这张工作表", problems[0])
+
+    def test_empty_range_is_reported_as_not_adopted(self):
+        sheets = {"sheets": [{"sheet_id": 1, "name": "数据"}]}
+        problems = self._adopted([sheets, {"range_data": []}], [("数据", "B2", "42")])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("云端读回 None", problems[0])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

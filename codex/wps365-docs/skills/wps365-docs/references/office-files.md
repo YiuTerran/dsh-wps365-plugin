@@ -3,7 +3,7 @@
 > 本文件属于 `wps365-docs` 技能，配合 `{skillDir}/SKILL.md` 使用。
 
 > 命令约定：下方命令是 POSIX 单行示例。PowerShell 中对带引号的可执行文件使用调用运算符 &，例如 & "{python}" ... 或 & "{cli}" ...；将脚本路径分隔符改为反斜杠，参数与冲突检查选项保持一致。
-> API behavior and measurements below are inherited from the DSH 0.1.2 project notes; they are not new Codex cloud end-to-end verification.
+> API behavior and measurements below are inherited from the DSH 0.1.3 project notes; they are not new Codex cloud end-to-end verification.
 
 
 
@@ -42,7 +42,9 @@ file_write.py 以字节流上传，接口不限制文件内部结构；编辑工
 
 file_write.py 的 --dry-run 只申请上传、不 PUT 或提交文件；不要用它替代冲突检查或真实写入。
 
-上传是**字节透传**，`.docx` / `.xlsx` / `.pptx` 通用（实测覆盖前两种）。
+上传是**字节透传**，`.docx` / `.xlsx` / `.pptx` 通用。
+
+⚠️ 但"字节传上去了"不等于"云端内容改了"：**有服务端内容模型的在线表格不采纳字节覆盖** —— 版本号与字节都会更新，在线内容却仍是旧的。见硬约束第 11 条；`xlsx_edit.py` 会上传后读回验证，遇到这种情况**以退出码 1 明确失败**。Codex 若用自带 Office 技能走同样的字节路径，也请自行读回确认。
 
 ## 改 .xlsx：Codex 的推荐流程
 
@@ -73,10 +75,12 @@ PowerShell 使用调用运算符，路径参数仍需加引号：
 6. 下载原件**必须带 delegated token**（脚本已处理），不带返回 `{"result":"userNotLogin"}`（与 .otl 附件相反，那些匿名可下）。
 7. 两个 `api post` 与 PUT 必须同一身份；不显式传 `--token-type delegated` 时默认 app 身份会因缺 `kso.file.readwrite` 报 403。
 8. `drive file download --with-hash` 的哈希**与下载字节一致（可信）**，可作回读校验（与 `attachment_list[].hash.sum` 正好相反）。
-9. **回滚只能靠自己的本地备份**：spec 里有 `POST /v7/drives/{drive_id}/files/{file_id}/versions/{version_num}/revert` 与 `versions/{version_num}/download`，但**网关实测两条都是 `404 page not found`**（同族的 `GET .../versions` 与 `.../versions/{n}/meta` 正常返回 `code 0`，所以不是路径写错）。CLI 也只包了 `file-version list` / `get`，没有 revert 命令。**结论：改重要文件前一定加 `--backup-dir`**，要回滚就把备份字节用 `file_write.py --file 备份 --expect-version <当前版本>` 传回去 —— 实测可行（v1 备份传回后版本号自增到 v4，内容与 v1 逐字节一致）。
+9. **回滚只能靠自己的本地备份**：spec 里有 `POST /v7/drives/{drive_id}/files/{file_id}/versions/{version_num}/revert` 与 `versions/{version_num}/download`，但**网关实测两条都是 `404 page not found`**（同族的 `GET .../versions` 与 `.../versions/{n}/meta` 正常返回 `code 0`，所以不是路径写错）。CLI 也只包了 `file-version list` / `get`，没有 revert 命令。**结论：改重要文件前一定加 `--backup-dir`**，要回滚就把备份字节用 `file_write.py --file 备份 --expect-version <当前版本>` 传回去 —— 实测可行（v1 备份传回后版本号自增到 v4，内容与 v1 逐字节一致）。2026-10-15 复测补充：列表接口**必须带 `page_size`**，否则 400 `请求参数不支持`；`versions/{n}/download` 仍 404；`revert` 在 CLI 里连 GET 操作都没有；`versions/{n}/meta` 在版本号不存在时回 403 `资源不存在`。**spec 里列着 ≠ 这个租户能用**。
 10. **`file_write.py --md` 生成 docx 的真实能力**（实测）：`#`/`##` → Heading 1/2 ✅、`- ` → `List Bullet` ✅、表格 → 真 Word 表格 ✅、`**加粗**` → run `bold=True` ✅；但 **`行内代码` 不带任何代码样式/等宽字体**、**`[文本](url)` 会以 `[文本](url)` 字面文本留在文档里**（不生成超链接）、**`>` 引用块落到 `Normal` 样式**（模板里有 `Intense Quote`，只是没用上）。需要这三种效果时，走"下载 → python-docx 改 → 传回"，或接受降级。
 
-## .xlsx 的接口写入（仅作补充，不推荐当主路径）
+11. ⚠️ **`.xlsx` 的字节覆盖对「在线表格」不生效**（2026-10-15 双方各自实测一致）：把 B1 从 `1` 改成 `42` 后按字节上传，`version` 1→2 且云端字节与本机一致，但 `GET /v7/sheets/{file_id}/worksheets/{sheet_id}/range_data` **读回仍是 1**。区别在于文件有没有服务端内容模型：**纯字节上传**的文件模型就来自字节（同一次实验里 B2=42 立刻读回一致）；被**在线编辑过**的文件则以服务端模型为准，字节被存下来、内容却不采纳。所以传回后必须读回自己写过的单元格，只信 `version` 自增会得到假成功。`xlsx_edit.py` 已内置这道校验（`--set` 的字面值；公式与 `--py` 改动无法核对，会明确说跳过）；Codex 用自带 Office 技能时请手动读回确认。另有报告称随后任何一次在线写入会按服务端模型重新序列化、覆盖上传的字节；本次复现里没出现（版本号与字节都没变），按"取决于场景"看待。**要改在线表格的内容，走下一节的单元格/公式接口，或让用户在线手动粘贴。**
+
+## .xlsx 的接口写入（对**在线表格**才是可靠路径；对纯字节文件仍推荐字节传回）
 
 `.xlsx` 确实有单元格写接口，但限制很大，只在"不想开文件、精确改几个格"时用：
 

@@ -3,7 +3,7 @@
 > 本文件属于 `wps365-docs` 技能，配合 `{skillDir}/SKILL.md` 使用。
 
 > 命令约定：下方命令是 POSIX 单行示例。PowerShell 中对带引号的可执行文件使用调用运算符 &，例如 & "{python}" ... 或 & "{cli}" ...；将脚本路径分隔符改为反斜杠，参数与冲突检查选项保持一致。
-> API behavior and measurements below are inherited from the DSH 0.1.2 project notes; they are not new Codex cloud end-to-end verification.
+> API behavior and measurements below are inherited from the DSH 0.1.3 project notes; they are not new Codex cloud end-to-end verification.
 
 
 

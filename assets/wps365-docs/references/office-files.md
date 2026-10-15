@@ -36,7 +36,9 @@
 {python} {skillDir}/scripts/file_write.py --drive-id <盘> --file-id <file_id> --file x.docx --dry-run
 ```
 
-上传是**字节透传**，`.docx` / `.xlsx` / `.pptx` 通用（实测覆盖前两种）。
+上传是**字节透传**，`.docx` / `.xlsx` / `.pptx` 通用。
+
+⚠️ 但"字节传上去了"不等于"云端内容改了"：**有服务端内容模型的在线表格不采纳字节覆盖** —— 版本号与字节都会更新，在线内容却仍是旧的。见硬约束第 10 条；`xlsx_edit.py` 现在会读回验证，遇到这种情况**以退出码 1 明确失败**，不再报成功。
 
 ## 改 .xlsx：一条龙（推荐）
 
@@ -76,12 +78,13 @@ PY
 6. 下载原件**必须带 delegated token**（脚本已处理），不带返回 `{"result":"userNotLogin"}`（与 .otl 附件相反，那些匿名可下）。
 7. 两个 `api post` 与 PUT 必须同一身份；不显式传 `--token-type delegated` 时默认 app 身份会因缺 `kso.file.readwrite` 报 403。
 8. `drive file download --with-hash` 的哈希**与下载字节一致（可信）**，可作回读校验（与 `attachment_list[].hash.sum` 正好相反）。
-9. **回滚只能靠自己的本地备份**：spec 里有 `POST /v7/drives/{drive_id}/files/{file_id}/versions/{version_num}/revert` 与 `versions/{version_num}/download`，但**网关实测两条都是 `404 page not found`**（同族的 `GET .../versions` 与 `.../versions/{n}/meta` 正常返回 `code 0`，所以不是路径写错）。CLI 也只包了 `file-version list` / `get`，没有 revert 命令。**结论：改重要文件前一定加 `--backup-dir`**，要回滚就把备份字节用 `file_write.py --file 备份 --expect-version <当前版本>` 传回去 —— 实测可行（v1 备份传回后版本号自增到 v4，内容与 v1 逐字节一致）。
+9. **回滚只能靠自己的本地备份**：spec 里有 `POST /v7/drives/{drive_id}/files/{file_id}/versions/{version_num}/revert` 与 `versions/{version_num}/download`，但**网关实测两条都是 `404 page not found`**（同族的 `GET .../versions` 与 `.../versions/{n}/meta` 正常返回 `code 0`，所以不是路径写错）。CLI 也只包了 `file-version list` / `get`，没有 revert 命令。**结论：改重要文件前一定加 `--backup-dir`**，要回滚就把备份字节用 `file_write.py --file 备份 --expect-version <当前版本>` 传回去 —— 实测可行（v1 备份传回后版本号自增到 v4，内容与 v1 逐字节一致）。2026-10-15 复测补充：列表接口**必须带 `page_size`**，否则 400 `请求参数不支持`（看起来像"没有这个接口"，其实只是漏了必填 query）；`versions/{n}/download` 仍 404；`revert` 在 CLI 里连 GET 操作都没有；`versions/{n}/meta` 在版本号不存在时回 403 `资源不存在`。**spec 里列着 ≠ 这个租户能用**。
 10. **`file_write.py --md` 生成 docx 的真实能力**（实测）：`#`/`##` → Heading 1/2 ✅、`- ` → `List Bullet` ✅、表格 → 真 Word 表格 ✅、`**加粗**` → run `bold=True` ✅；但 **`行内代码` 不带任何代码样式/等宽字体**、**`[文本](url)` 会以 `[文本](url)` 字面文本留在文档里**（不生成超链接）、**`>` 引用块落到 `Normal` 样式**（模板里有 `Intense Quote`，只是没用上）。需要这三种效果时，走"下载 → python-docx 改 → 传回"，或接受降级。
+11. ⚠️ **`.xlsx` 的字节覆盖对「在线表格」不生效**（2026-10-15 双方各自实测一致）：把 B1 从 `1` 改成 `42` 后按字节上传，`version` 1→2 且云端字节与本机一致，但 `GET /v7/sheets/{file_id}/worksheets/{sheet_id}/range_data` **读回仍是 1**。区别在于这个文件有没有服务端内容模型：**纯字节上传**的文件模型就来自字节，改了就是改了（同一次实验里 B2=42 立刻读回一致）；被**在线编辑过**的文件（在网页里改过、或用 sheets 接口建过工作表）则以服务端模型为准，你的字节被存下来、内容却不采纳。所以 `xlsx_edit.py` 上传后会**读回自己用 `--set` 写过的字面值单元格**，不一致就打印"上传成功但云端没有采纳"并**以退出码 1 结束** —— 只信 `version` 自增会得到假成功（那位同学的原话：「version 增加了，看着像成功」）。`--py` 改动与公式改动无法用接口核对（接口不回公式原文），脚本会明确说跳过验证。另有报告称随后任何一次在线写入会按服务端模型重新序列化、覆盖上传的字节；我这次复现里没出现（版本号与字节都没变），按"取决于场景"看待。**要改在线表格的内容，走下一节的单元格/公式接口，或让用户在线手动粘贴。**
 
-## .xlsx 的接口写入（仅作补充，不推荐当主路径）
+## .xlsx 的接口写入（对**在线表格**才是可靠路径；对纯字节文件仍推荐 `xlsx_edit.py`）
 
-`.xlsx` 确实有单元格写接口，但限制很大，只在"不想开文件、精确改几个格"时用：
+`.xlsx` 确实有单元格写接口，但限制很大，只在"不想开文件、精确改几个格"时用（另见第 11 条：在线表格的字节覆盖不被采纳）：
 
 - `POST /v7/sheets/{file_id}/worksheets/{sheet_id}/range_data/batch_update`，body 的 `sheets_update_range_data` **只有 `cell_pic_info / formula / merge_type / op_type / xf` + 行列范围，没有任何字面值字段** —— 传 `cell_text` / `value` / `original_cell_value` 一律 `400000003`。**写值只能走公式**：数字用 `=999`，文本用 `="你好"`。
 - 可用 `op_type`：`cell_operation_type_formula`（写公式）/ `_format`（格式，走 `xf`；颜色对象是 `{tint,type,value}`，**不是** rgb）/ `_merge`（合并）/ `_picture`。实测合并会落盘为 `<mergeCell ref="A22:C22"/>`。

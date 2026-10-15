@@ -47,6 +47,8 @@ If wps365-cli is missing, stop before cloud operations and explain that the user
 
 These write paths have different semantics. Smart documents expose block operations; Office files are replaced as complete byte streams. Do not use one path as a substitute for the other.
 
+⚠️ One exception matters: a **byte upload is not adopted for an online spreadsheet** that already has a server-side content model. The version and the stored bytes both advance while the live cells keep their old values, so the write looks successful and is not. Read the cells you wrote back with the sheets API before reporting success (xlsx_edit.py does this for `--set`, then fails with exit code 1 when nothing was adopted); to change an online spreadsheet, use the cell/formula endpoints in references/office-files.md or let the user paste the values.
+
 ## Read a document
 
 Smart document export creates doc.md and, by default, downloads attachments to an img/ directory. The script prints a compact inventory so long document bodies and base64 export payloads stay out of the conversation:
