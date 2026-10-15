@@ -373,10 +373,40 @@ class XlsxReadbackTest(unittest.TestCase):
     def test_same_literal_tolerates_type_and_format(self):
         for actual in (99, "99", 99.0, " 99 "):
             self.assertTrue(xlsx_edit.same_literal("99", actual), actual)
-        self.assertTrue(xlsx_edit.same_literal('"你好"', "你好"))
+        self.assertTrue(xlsx_edit.same_literal('"你好"', '"你好"'))
         self.assertTrue(xlsx_edit.same_literal("", None))
         self.assertFalse(xlsx_edit.same_literal("99", 1))
         self.assertFalse(xlsx_edit.same_literal("42", None))
+
+    def test_boolean_expectations_match_the_written_type(self):
+        for raw, value in (("true", True), ("FALSE", False)):
+            for actual in (value, str(value), str(value).upper()):
+                self.assertTrue(xlsx_edit.same_literal(raw, actual))
+            for actual in (not value, int(value), str(int(value)), None):
+                self.assertFalse(xlsx_edit.same_literal(raw, actual))
+        self.assertFalse(xlsx_edit.same_literal("1", True))
+        self.assertFalse(xlsx_edit.same_literal("0", False))
+
+    def test_text_preserves_quotes_and_whitespace(self):
+        for raw, stale in (('"你好"', "你好"), (" 你好 ", "你好")):
+            self.assertTrue(xlsx_edit.same_literal(raw, raw))
+            self.assertFalse(xlsx_edit.same_literal(raw, stale))
+        self.assertFalse(xlsx_edit.same_literal("9007199254740993", "9007199254740992"))
+
+    def test_repeated_assignments_verify_only_the_final_value(self):
+        self.assertEqual(xlsx_edit.literal_expectations(
+            ["数据!a1=1", "数据!$A$1=2"]), [("数据", "A1", "2")])
+        self.assertEqual(xlsx_edit.literal_expectations(
+            ["数据!A1=1", "数据!A1==B1*2"]), [])
+        self.assertEqual(xlsx_edit.literal_expectations(
+            ["数据!A1==B1*2", "数据!A1=3"]), [("数据", "A1", "3")])
+
+    def test_empty_range_accepts_clearing_but_rejects_nonempty_values(self):
+        sheets = {"sheets": [{"sheet_id": 1, "name": "数据"}]}
+        self.assertEqual(self._adopted([sheets, {"range_data": []}],
+                                      [("数据", "B2", "")]), [])
+        self.assertEqual(len(self._adopted([sheets, {"range_data": []}],
+                                          [("数据", "B2", "42")])), 1)
 
     def _adopted(self, side_effect, expectations):
         with mock.patch.object(file_fetch, "api", side_effect=side_effect):

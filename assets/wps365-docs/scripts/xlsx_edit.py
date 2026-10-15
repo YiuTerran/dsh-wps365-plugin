@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 import glob
 import os
 import shutil
@@ -281,16 +282,18 @@ def literal_expectations(sets: list[str]) -> list[tuple[str, str, str]]:
     公式（`=...`）排除在外：sheets 接口只回计算结果、拿不到公式原文，核对不了
     "我写进去的是不是那个公式"。
     """
-    expectations: list[tuple[str, str, str]] = []
+    final_values: dict[tuple[str, str], str] = {}
     for spec in sets:
         coord, sep, raw = spec.partition("=")
-        if not sep or raw.lstrip().startswith("="):
+        if not sep:
             continue
         sheet_name, _, cell = coord.rpartition("!")
         if not sheet_name or not cell:
             continue
-        expectations.append((sheet_name, cell.strip().upper(), raw))
-    return expectations
+        final_values[(sheet_name, cell.strip().replace("$", "").upper())] = raw
+    # 与 apply_edits 一样，重复赋值以后一次为准，包括最后写入公式的情况。
+    return [(sheet, cell, raw) for (sheet, cell), raw in final_values.items()
+            if not raw.lstrip().startswith("=")]
 
 
 def cell_indices(cell: str) -> tuple[int, int]:
@@ -307,16 +310,22 @@ def cell_indices(cell: str) -> tuple[int, int]:
 
 def same_literal(expected: str, actual) -> bool:
     """宽容比较云端读回值：类型与格式可能与本地写法不同（99 / '99' / 99.0）。"""
-    want = expected.strip().strip('"')
-    if actual is None:
-        return want == ""
-    have = str(actual).strip()
-    if want == have:
-        return True
-    try:
-        return float(want) == float(have)
-    except ValueError:
-        return False
+    want = parse_value(expected)
+    if want is None:
+        return actual is None or actual == ""
+    if isinstance(want, bool):
+        if isinstance(actual, bool):
+            return want == actual
+        return isinstance(actual, str) and actual.strip().lower() == str(want).lower()
+    if isinstance(want, (int, float)):
+        if isinstance(actual, bool) or not isinstance(actual, (int, float, str)):
+            return False
+        try:
+            return Decimal(str(want)) == Decimal(str(actual).strip())
+        except InvalidOperation:
+            return False
+    # 引号和非空文本两端的空白都是 parse_value 实际写入的内容。
+    return isinstance(actual, str) and want == actual
 
 
 def verify_adopted(cli: str, file_id: str, expectations: list[tuple[str, str, str]],
@@ -342,15 +351,14 @@ def verify_adopted(cli: str, file_id: str, expectations: list[tuple[str, str, st
         data = file_fetch.api(cli, "get", f"/v7/sheets/{file_id}/worksheets/{sid}/range_data",
                               timeout, query={"row_from": row, "row_to": row,
                                               "col_from": col, "col_to": col})
-        found = False
         actual = None
         for item in data.get("range_data") or []:
             if item.get("row_from") == row and item.get("col_from") == col:
-                found = True
                 actual = item.get("original_cell_value")
                 if actual in (None, ""):
                     actual = item.get("cell_text")
-        if not found or not same_literal(expected, actual):
+        # 稀疏响应中缺失的单元格按空值核对，不能把清空操作误报为失败。
+        if not same_literal(expected, actual):
             problems.append(f"{sheet_name}!{cell}：期望 {expected!r}，云端读回 {actual!r}")
     return problems
 
