@@ -35,3 +35,9 @@ jobs:
       # would break installed bundles, not this checkout).
       - name: Inspect the publish tarball
         run: npm run check:pack
+
+      # The Codex plugin ships adapted copies of the skill documents. Its check
+      # builds the plugin and fails when a constraint shared with the DSH original
+      # was edited on one side only (or added without declaring it).
+      - name: Validate the Codex plugin
+        run: npm --prefix codex test

@@ -23,6 +23,189 @@ const SCRIPT_NAMES = [
 const FORBIDDEN_PARTS = new Set(['node_modules', '__pycache__', '.git', '.venv', 'venv'])
 const FORBIDDEN_FILE = /^(?:\.env(?:\..*)?|\.npmrc|\.pypirc|credentials?(?:[._-].*)?|secrets?(?:[._-].*)?|.*\.(?:pem|key|p12|pfx|token))$/i
 
+/**
+ * Paragraphs the Codex copy shares with the DSH original.
+ *
+ * The Codex references are adaptations, not copies, so comparing whole files
+ * would be noise. What must not drift is the measured API behaviour and the
+ * operating rules: those numbered constraints state the same facts on both
+ * sides, and a correction applied to only one of them leaves the other telling
+ * readers something false.
+ *
+ * `shared` items must hash-match after whitespace normalisation. `adapted` items
+ * are deliberately reworded for Codex and are only checked for presence — the
+ * point of listing them is that a new constraint cannot appear on one side and
+ * be silently skipped on the other: it has to be declared here as one or the
+ * other, and the item counts must agree.
+ *
+ * Adding a constraint to either side therefore fails this check until the
+ * manifest below is updated.
+ */
+const SHARED_DOCUMENTS = [
+  {
+    name: 'office-files.md',
+    dsh: join(REPO_DIR, 'assets', 'wps365-docs', 'references', 'office-files.md'),
+    codex: join(SOURCE_DIR, 'skills', 'wps365-docs', 'references', 'office-files.md'),
+    sections: {
+      '## 底层路线与硬约束': { shared: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], adapted: [11] },
+      // Codex has no LibreOffice kit, so the recalculation advice is its own.
+      '## 本地编辑的两个坑': { shared: [2], adapted: [1] },
+    },
+    wholeSections: [],
+  },
+  {
+    name: 'otl.md',
+    dsh: join(REPO_DIR, 'assets', 'wps365-docs', 'references', 'otl.md'),
+    codex: join(SOURCE_DIR, 'skills', 'wps365-docs', 'references', 'otl.md'),
+    sections: {
+      '## 硬约束（踩过的坑）': {
+        shared: [1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13, 14, 15, 16, 17],
+        // 7 and 9 are phrased for Codex: it passes --cli explicitly and talks
+        // about visual context rather than the DSH image pipeline.
+        adapted: [7, 9],
+      },
+    },
+    wholeSections: ['## 为什么有这条专用路线'],
+  },
+  {
+    name: 'concurrency.md',
+    dsh: join(REPO_DIR, 'assets', 'wps365-docs', 'references', 'concurrency.md'),
+    codex: join(SOURCE_DIR, 'skills', 'wps365-docs', 'references', 'concurrency.md'),
+    sections: {},
+    // Same document on both sides, so the whole body must match.
+    wholeSections: [
+      '## 并发写入的实测语义（为什么 `replace` 必须全文比对）',
+      '## 盘级元数据是异步滞后的（.otl 尤其明显）',
+    ],
+  },
+]
+
+/** Collapse formatting-only differences so a reflow is not reported as drift. */
+function normalizeParagraph(text) {
+  return text
+    .replace(/\r\n/gu, '\n')
+    .replace(/[ \t]+$/gmu, '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+}
+
+/** Map every `##`/`###` heading to the body that follows it. */
+function splitSections(markdown) {
+  const sections = new Map()
+  let heading = '(preamble)'
+  let body = []
+  for (const line of markdown.split('\n')) {
+    if (/^#{2,3}\s/u.test(line)) {
+      sections.set(heading, body.join('\n'))
+      heading = line.trim()
+      body = []
+      continue
+    }
+    body.push(line)
+  }
+  sections.set(heading, body.join('\n'))
+  return sections
+}
+
+/** Map `1. …` style paragraphs (with their continuation lines) to their numbers. */
+function numberedItems(body) {
+  const items = new Map()
+  let current = null
+  let buffer = []
+  const flush = () => {
+    if (current !== null) items.set(current, normalizeParagraph(buffer.join('\n')))
+    current = null
+    buffer = []
+  }
+  for (const line of body.split('\n')) {
+    const match = /^(\d+)\.\s+(.*)$/u.exec(line)
+    if (match) {
+      flush()
+      current = Number(match[1])
+      buffer = [match[2]]
+      continue
+    }
+    if (current !== null) buffer.push(line)
+  }
+  flush()
+  return items
+}
+
+function shortHash(text) {
+  return createHash('sha256').update(text).digest('hex').slice(0, 12)
+}
+
+/**
+ * Compare every declared shared paragraph and report the drift found.
+ *
+ * @returns a list of human-readable problems; empty means the copies agree.
+ */
+function sharedDocumentProblems() {
+  const problems = []
+  for (const document of SHARED_DOCUMENTS) {
+    const dshSections = splitSections(readFileSync(document.dsh, 'utf8'))
+    const codexSections = splitSections(readFileSync(document.codex, 'utf8'))
+
+    for (const [heading, declaration] of Object.entries(document.sections)) {
+      const dshBody = dshSections.get(heading)
+      const codexBody = codexSections.get(heading)
+      if (dshBody === undefined || codexBody === undefined) {
+        problems.push(`${document.name}: 小节 ${heading} 只存在于一侧`)
+        continue
+      }
+      const dshItems = numberedItems(dshBody)
+      const codexItems = numberedItems(codexBody)
+      const declared = new Set([...declaration.shared, ...declaration.adapted])
+
+      for (const number of dshItems.keys()) {
+        if (!codexItems.has(number)) problems.push(`${document.name} ${heading}: codex 缺第 ${number} 条`)
+      }
+      for (const number of codexItems.keys()) {
+        if (!dshItems.has(number)) problems.push(`${document.name} ${heading}: codex 多出第 ${number} 条`)
+      }
+      for (const number of declared) {
+        if (!dshItems.has(number) && !codexItems.has(number)) {
+          problems.push(`${document.name} ${heading}: 清单里的第 ${number} 条两侧都不存在（清单写错了？）`)
+        }
+      }
+      for (const number of new Set([...dshItems.keys(), ...codexItems.keys()])) {
+        if (!declared.has(number)) {
+          problems.push(
+            `${document.name} ${heading}: 第 ${number} 条既未声明为 shared 也未声明为 adapted —— `
+            + '新增/改动的条目必须在 checks/validate.mjs 的 SHARED_DOCUMENTS 里登记',
+          )
+        }
+      }
+      for (const number of declaration.shared) {
+        const dshText = dshItems.get(number)
+        const codexText = codexItems.get(number)
+        if (dshText === undefined || codexText === undefined) continue
+        if (dshText !== codexText) {
+          problems.push(
+            `${document.name} 第 ${number} 条两侧不再一致（DSH ${shortHash(dshText)} / codex ${shortHash(codexText)}）`,
+          )
+        }
+      }
+    }
+
+    for (const heading of document.wholeSections) {
+      const dshBody = dshSections.get(heading)
+      const codexBody = codexSections.get(heading)
+      if (dshBody === undefined || codexBody === undefined) {
+        problems.push(`${document.name}: 共享小节 ${heading} 只存在于一侧`)
+        continue
+      }
+      if (normalizeParagraph(dshBody) !== normalizeParagraph(codexBody)) {
+        problems.push(
+          `${document.name} 小节 ${heading} 两侧不一致（DSH ${shortHash(normalizeParagraph(dshBody))} / `
+          + `codex ${shortHash(normalizeParagraph(codexBody))}）`,
+        )
+      }
+    }
+  }
+  return problems
+}
+
 function hash(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
@@ -94,6 +277,15 @@ function archiveFiles(archivePath) {
   }
   return names.filter((name) => !name.endsWith('/')).map((name) => name.slice('wps365-docs/'.length)).sort()
 }
+
+test('shared paragraphs still match the DSH originals', () => {
+  const problems = sharedDocumentProblems()
+  assert.deepEqual(
+    problems,
+    [],
+    `the Codex references drifted from the DSH originals:\n  ${problems.join('\n  ')}`,
+  )
+})
 
 test('builds portable plugin contents and a matching tar.gz archive', (t) => {
   const temporaryRoot = mkdtempSync(join(tmpdir(), 'wps365-docs-plugin-'))

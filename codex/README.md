@@ -20,11 +20,21 @@ Office 文件编辑依赖已安装的 documents、spreadsheets 或 presentations
 构建输出：
 
 - codex/dist/wps365-docs/：可检查的插件目录，包含 manifests、技能内容、参考资料、随包图标和从原始 assets/wps365-docs/scripts 复制的 Python 脚本。
-- codex/dist/wps365-docs-0.1.2.tar.gz：同一插件的归档包。
+- codex/dist/wps365-docs-<版本>.tar.gz：同一插件的归档包（文件名跟随当前版本，例如 `wps365-docs-0.1.3.tar.gz`）。
 
 Codex 两份 manifest 的版本号跟随仓库根目录 `package.json`；后续发版时同步更新两份 manifest，构建会在版本不一致时失败。
 
 构建脚本只从原始 assets/wps365-docs/scripts 读取脚本，codex/ 源文件不会维护 Python 副本。源码目录为 codex/wps365-docs；生成内容集中在 codex/dist/。
+
+### 共享段落校验
+
+`codex/wps365-docs/skills/wps365-docs/references/*.md` 是与 DSH 原版**平行维护**的改编副本（脚本是单源复制的，文档不是）。`npm --prefix codex test`（CI 也会跑）会比对两边**共享的编号条文与整节段落**：
+
+- 只改一侧的条文 → 报 `第 N 条两侧不再一致`，并给出两侧的短哈希；
+- 一侧新增或删除条目 → 报 `codex 缺第 N 条` / `codex 多出第 N 条`；
+- 新增条文必须先在 `checks/validate.mjs` 的 `SHARED_DOCUMENTS` 里登记：`shared`（两边必须逐字一致）或 `adapted`（有意为 Codex 改写，只校验存在性与条目数），否则报 `既未声明为 shared 也未声明为 adapted`。
+
+也就是说：以后在 DSH 侧修正一条实测结论时，如果 Codex 侧没跟上，CI 会直接失败，而不是留下两份互相矛盾的说法。
 
 ## 开发与安装
 
