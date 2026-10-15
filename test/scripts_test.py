@@ -41,8 +41,9 @@ import xlsx_edit  # noqa: E402
 class DefaultCliTest(unittest.TestCase):
     def test_windows_default_names_the_exe(self):
         path = _wps_cli.default_cli("win32", env={})
-        self.assertTrue(path.endswith("wps365-cli.exe"), path)
-        self.assertNotIn("/", path, "a Windows default must not mix separators")
+        # The injected platform selects the executable name; path separators
+        # still follow the host running this test.
+        self.assertEqual(path, os.path.join(_wps_cli.default_dir({}), "wps365-cli.exe"))
 
     def test_posix_default_stays_bare(self):
         path = _wps_cli.default_cli("linux", env={})
@@ -164,10 +165,23 @@ class LegacyXlsGuardTest(unittest.TestCase):
             path = os.path.join(tmp, "original.xlsx")
             with open(path, "wb") as fh:
                 fh.write(bytes.fromhex("d0cf11e0a1b11ae1") + b"\x00" * 64)
-            with self.assertRaises(SystemExit) as caught:
-                file_fetch.xlsx_read_local(path, tmp, 50, 20, False)
+            with mock.patch.dict(sys.modules, {"openpyxl": None, "openpyxl.utils": None}):
+                with self.assertRaises(SystemExit) as caught:
+                    file_fetch.xlsx_read_local(path, tmp, 50, 20, False)
         message = str(caught.exception)
         self.assertIn("OLE2", message)
+        self.assertIn("--via-api", message)
+
+    def test_non_ole2_file_keeps_the_missing_dependency_guidance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "valid.xlsx")
+            with open(path, "wb") as fh:
+                fh.write(b"PK\x03\x04" + b"\x00" * 64)
+            with mock.patch.dict(sys.modules, {"openpyxl": None, "openpyxl.utils": None}):
+                with self.assertRaises(SystemExit) as caught:
+                    file_fetch.xlsx_read_local(path, tmp, 50, 20, False)
+        message = str(caught.exception)
+        self.assertIn("需要 openpyxl", message)
         self.assertIn("--via-api", message)
 
 

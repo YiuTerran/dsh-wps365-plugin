@@ -154,13 +154,6 @@ def xlsx_read_local(path: str, out_dir: str, max_rows: int, max_cols: int,
 
     返回 (markdown, 公式数, 工作表数)。
     """
-    try:
-        from openpyxl import load_workbook
-        from openpyxl.utils import get_column_letter
-    except ImportError:
-        sys.exit("[file_fetch] 本地解析 .xlsx 需要 openpyxl。请用工作区自带的 Python 运行"
-                 "（load_workspace_dependencies 给出的可执行文件），或加 --via-api 改走 sheets 接口。")
-
     # 扩展名会骗人：云盘上带 .xlsx 名字的老式 .xls（OLE2 复合文档）并不少见，
     # openpyxl 会抛一句"File is not a zip file"让人摸不着头脑。这里先按魔数判断，
     # 给一条能直接照做的提示，而不是让异常栈直接冒到模型面前。
@@ -170,6 +163,13 @@ def xlsx_read_local(path: str, out_dir: str, max_rows: int, max_cols: int,
         sys.exit(f"[file_fetch] {os.path.basename(path)} 的名字是 .xlsx，内容却是老式 .xls"
                  "（OLE2 复合文档），openpyxl 打不开。请让用户另存为 .xlsx 后重试；"
                  "只想拿单元格值可以加 --via-api 走 sheets 接口（代价是拿不到公式原文）。")
+
+    try:
+        from openpyxl import load_workbook
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        sys.exit("[file_fetch] 本地解析 .xlsx 需要 openpyxl。请用工作区自带的 Python 运行"
+                 "（load_workspace_dependencies 给出的可执行文件），或加 --via-api 改走 sheets 接口。")
 
     wb = load_workbook(path, data_only=False)      # 公式原文
     wbv = load_workbook(path, data_only=True)      # 缓存计算值
