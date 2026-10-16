@@ -192,6 +192,7 @@ codex/                        # Codex 本地插件适配；构建与安装说明
 
 ## 更新记录
 
+- **0.1.4** — 修正 `.xlsx` 写回读回校验：重复设置同一单元格时只校验最后一次赋值，布尔值、文本引号与空白按实际写入类型比较，清空单元格时正确接受稀疏空响应。详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.1.3** — 修掉一个**会静默骗人的写入失败**：`.xlsx` 的字节覆盖对「在线表格」不生效（版本号与字节都更新了，线上单元格却仍是旧值）。`xlsx_edit.py` 现在上传后会读回自己用 `--set` 写过的单元格，不一致就以退出码 1 明确失败并说明下一步；纯字节文件不受影响。文档同步补上这条硬约束（含实测数据）与 `versions` 接口必须带 `page_size` 等复测结论；Python 侧测试增到 34 例。详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.1.2** — 包含 Windows 支持与修复：CLI 按平台发现、脚本统一使用 UTF-8 管道与输出，Windows 上可定位 LibreOffice kit 和 Node，并给伪装成 `.xlsx` 的 `.xls` 提供可操作提示。Python 侧测试现为 27 例。另修复并发写入未检测块顺序变化、默认配置漏查 `PATH`，以及 Node 缺失时误用 Python 解释器启动的问题；详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.1.1** — 修复一个**会导致 Harness 打不开**的严重问题。0.1.0 的手写 Config 上带了一个 `toJSON()` 方法，而 DSH 的 settings 服务用 `"toJSON" in schema` 这个鸭子类型挑选要渲染的 schema，选中后紧接着读 `schema.meta.volatile` —— 手写对象没有 `meta`，于是抛 `TypeError`，`settings/describe` 失败，桌面端 welcome RPC 报 `Web RPC failed`，窗口起不来。删掉 `toJSON()` 即可（`~standard.validate` 不受影响，配置校验照常），并加了回归测试锁住这个形状。同一版本起开始发布到 npm。
