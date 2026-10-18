@@ -6,6 +6,10 @@
 
 装好之后不用再手动导出、复制粘贴：你可以直接让 agent 读一篇 WPS 智能文档、把内容写进云文档、改云端表格里的某个单元格，它都能真的去读写你的 WPS 365 文档 —— 包括别人通过分享链接给你的文档。
 
+> ⚠️ **本插件仅适用于 WPS 365 企业版账号，个人版账号请勿使用。**
+>
+> 它调用的是 WPS 365 企业版提供的云文档接口，`wps365-cli` 也必须用企业版账号完成授权。WPS 个人版账号没有这些能力，装上也读写不了任何文档；个人版用户请不要安装，也不要尝试用它处理本地文件。
+
 > 插件本体只提供技能（`wps365-docs`）与配套脚本，**不含**任何 WPS 账号信息；所有云文档操作都由你自己安装的 `wps365-cli` 完成。
 
 ---
@@ -28,24 +32,52 @@
 
 ## 需要先准备什么
 
-1. **`wps365-cli`**（本插件不安装它，只使用它）
-   默认路径 `~/.local/bin/wps365-cli`（Windows 上是 `~\.local\bin\wps365-cli.exe`）。没配过就先授权：
-   ```
-   wps365-cli config init
-   wps365-cli auth login --device
-   ```
-   装在别处就在配置里指定 `cli`（见下；支持 `~` 与 `%NAME%`/`${NAME}` 展开，也可以直接写裸命令名让它在 `PATH` 里找）。**CLI 缺失或未授权不会让插件失效**：技能照常可用，只是会在技能正文里明确告诉你 CLI 没找到。
+1. **WPS 365 企业版账号（必须）**
+   本插件只适用于 WPS 365 企业版账号；**WPS 个人版账号不受支持，请勿安装和使用**。`wps365-cli` 需要先用企业版账号授权，本文提到的智能文档、云文档读写与分享链接解析能力才会生效。
 
-2. **Python（带 openpyxl）**
+2. **`wps365-cli`（运行本插件的必要条件；本插件不安装它，只使用它）**
+   所有云文档操作都由这个官方 CLI 完成；没装它，插件读写不了任何文档。[`wps365-open/cli`](https://github.com/wps365-open/cli) 是它的源码与文档仓库，用官方安装脚本安装：
+
+   **macOS / Linux**
+
+   ```bash
+   curl -fsSL https://open-docs.wpscdn.cn/cli/install.sh | bash
+   ```
+
+   **Windows（PowerShell）**
+
+   ```powershell
+   irm https://open-docs.wpscdn.cn/cli/install.ps1 | iex
+   ```
+
+   **Windows（Git Bash）**
+
+   ```bash
+   curl -fsSL https://open-docs.wpscdn.cn/cli/install.sh | bash
+   ```
+
+   macOS / Linux 默认装到 `~/.local/bin`（无需 sudo），Windows 上是 `~\.local\bin\wps365-cli.exe`。要指定版本或安装目录，在管道末尾的 `bash` 前加环境变量：`... | WPS365_VERSION=v0.3.6 bash`、`... | WPS365_INSTALL_DIR=~/.local/bin bash`；不想用脚本就去 [Release 页面](https://github.com/wps365-open/cli/releases) 下载对应平台的二进制文件。
+
+   装好后完成应用绑定与授权（只需一次）：
+
+   ```bash
+   wps365-cli config init        # 新建/绑定应用，在浏览器里完成
+   wps365-cli auth login --device
+   wps365-cli user me            # 确认当前登录身份
+   ```
+
+   `config init` 会打开浏览器完成应用创建/绑定与授权确认；企业管理员建议预先设置 CLI 应用免审规则，手动创建应用、配置回调地址与申请权限的完整流程见官方[前置准备：创建应用与权限配置](https://github.com/wps365-open/cli/blob/main/docs/prerequisites.md)。装在别处就在配置里指定 `cli`（见下；支持 `~` 与 `%NAME%`/`${NAME}` 展开，也可以直接写裸命令名让它在 `PATH` 里找）。**CLI 缺失或未授权不会让插件失效**：技能照常可用，只是会在技能正文里明确告诉你 CLI 没找到。
+
+3. **Python（带 openpyxl）**
    读 `.xlsx` 的公式、以及云端改表格需要 openpyxl。默认让 agent 用 `load_workspace_dependencies` 返回的解释器（该环境自带 openpyxl / python-docx）；想固定一个就在配置里指定 `python`。
 
-3. **会话里有 shell 工具**
+4. **会话里有 shell 工具**
    脚本由模型通过 shell 执行（macOS / Linux 是 `bash`，Windows 是 PowerShell 或 `cmd`）；另外还需要文件读取工具分页读导出的 `doc.md`、`read_image` 看图片。
 
-4. **平台差异（Windows）**
-   技能正文里的命令一律是单行、占位符由插件注入真实值，所以两个平台都能直接照抄；注入的「本机资源」一节会告诉你本机平台、Python 解释器、`wps365-cli` 路径与临时目录。Windows 上另需注意：路径含空格时用双引号包住；CLI 安装用 `irm https://open-docs.wpscdn.cn/cli/install.ps1 | iex`。
+5. **平台差异（Windows）**
+   技能正文里的命令一律是单行、占位符由插件注入真实值，所以两个平台都能直接照抄；注入的「本机资源」一节会告诉你本机平台、Python 解释器、`wps365-cli` 路径与临时目录。Windows 上另需注意：路径含空格时用双引号包住。
 
-5. **删掉手动安装的同名技能（重要）**
+6. **删掉手动安装的同名技能（重要）**
    如果你之前把这份技能手动放在 `~/.dsh/skills/wps365-docs`，同名技能里**它优先级更高**（用户目录里的技能盖住插件自带的），插件的版本就不会被用上。想让插件版本生效：
    ```
    rm -rf ~/.dsh/skills/wps365-docs
@@ -86,7 +118,7 @@ plugin_manager { action: "remove_bundle", target: "@tryao/dsh-wps365-plugin" }
 
 ## 在 Codex 中使用
 
-Codex 版本由 `codex/` 中的源码构建，和上面的 DSH 插件分别安装。克隆仓库后，在仓库根目录构建并运行打包检查：
+Codex 版本由 `codex/` 中的源码构建，和上面的 DSH 插件分别安装。Codex 版本同样**仅适用于 WPS 365 企业版账号**，个人版账号请勿使用。克隆仓库后，在仓库根目录构建并运行打包检查：
 
 ```bash
 git clone https://github.com/YiuTerran/dsh-wps365-plugin.git
@@ -101,7 +133,7 @@ npm --prefix codex test
 
 > 将当前仓库构建得到的 `codex/dist/wps365-docs` 注册到我的个人本地插件市场，并帮我安装。保留已有市场配置。
 
-Codex 的本地插件市场由本机配置发现，市场清单中的插件路径相对于市场根目录。安装到个人本地市场只对当前用户和设备生效，不会发布给其他用户；每位使用者都要安装并授权自己的 `wps365-cli`：
+Codex 的本地插件市场由本机配置发现，市场清单中的插件路径相对于市场根目录。安装到个人本地市场只对当前用户和设备生效，不会发布给其他用户；每位使用者都要安装并授权自己的 `wps365-cli`（安装与授权步骤见上文「需要先准备什么」第 2 条）：
 
 ```bash
 wps365-cli config init
@@ -146,6 +178,7 @@ Codex 使用本地执行环境运行 Python 脚本和 `wps365-cli`。处理 `.xl
 - **规模上限**：智能文档单次写入 1000 块（脚本自动分批）；代码块语言只有接口枚举内的才保留（写 `powershell` 会被静默降级成纯文本，它知道这件事）。
 - **普通文件走"下载 → 本地改 → 传回"**：`.docx` / `.xlsx` / `.pptx` 没有可用的逐段写接口，公式、格式、合并、多工作表全靠整文件传回保住。云端 `.xlsx` 的接口写入是异步落盘的，写完不要立刻下载校验。
 - **权限边界**：它用你本机 `wps365-cli` 的身份和权限操作云文档，能读写的就是那个账号能读写的东西；插件自己不保存、也不接触凭据。
+- **账号边界**：只支持 WPS 365 企业版账号；WPS 个人版账号请勿使用，接口不可用，插件无法工作。
 - **上下文开销**：技能正文保持精简，细节（17 条硬约束、接口细节、并发实测语义）放在三份按需读取的参考文档里，只有真需要时才读。
 - **升级**：换版本需要重启 Harness 才会加载新的 JS；只改技能文档（`assets/**`）的话，下次加载技能即生效。
 - 本插件**不注册**任何新工具、也不改动你 profile 里的 MCP 配置；`mcp__wps365__*`（如果你配了 WPS 的 MCP）与它是两套独立能力。

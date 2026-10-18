@@ -4,6 +4,10 @@ Gives your DSH **WPS 365 cloud document** superpowers.
 
 Once installed there is no more exporting, re-uploading, or copy-paste: ask the agent to read a WPS smart document, write content into one, or change a cell in a cloud spreadsheet, and it will actually operate on your WPS 365 documents — including documents other people shared with you by link.
 
+> ⚠️ **This plugin is only for WPS 365 enterprise accounts. Do not use it with a personal account.**
+>
+> It calls cloud-document APIs that only WPS 365 enterprise accounts provide, and `wps365-cli` must be authorized with an enterprise account. Personal WPS accounts have no such access, so the plugin cannot read or write any document; please do not install it or try to use it with a personal account.
+
 > The plugin only ships a skill (`wps365-docs`) plus its scripts. It holds **no** WPS account data: every cloud operation runs through the `wps365-cli` you installed.
 
 [中文说明](README.md)
@@ -28,21 +32,49 @@ It also carries the hard-won lessons of this workflow (17 hard constraints for s
 
 ## Before you start
 
-1. **`wps365-cli`** — not installed by this plugin, only used by it.
-   Default path `~/.local/bin/wps365-cli` (`~\.local\bin\wps365-cli.exe` on Windows). Authorize it first if you have not:
+1. **A WPS 365 enterprise account (required)**
+   This plugin only works with WPS 365 enterprise accounts; **personal WPS accounts are not supported — do not install or use it with one**. `wps365-cli` must be authorized with an enterprise account before the smart-document, cloud-document, and share-link features described here work.
+
+2. **`wps365-cli` (required to run this plugin; the plugin does not install it, it only uses it)**
+   Every cloud operation goes through this official CLI, so without it the plugin cannot read or write any document. [`wps365-open/cli`](https://github.com/wps365-open/cli) is its source and documentation repository; install it with the official installer:
+
+   **macOS / Linux**
+
+   ```bash
+   curl -fsSL https://open-docs.wpscdn.cn/cli/install.sh | bash
    ```
-   wps365-cli config init
+
+   **Windows (PowerShell)**
+
+   ```powershell
+   irm https://open-docs.wpscdn.cn/cli/install.ps1 | iex
+   ```
+
+   **Windows (Git Bash)**
+
+   ```bash
+   curl -fsSL https://open-docs.wpscdn.cn/cli/install.sh | bash
+   ```
+
+   On macOS / Linux it installs to `~/.local/bin` (no sudo needed); on Windows the binary is `~\.local\bin\wps365-cli.exe`. To pin a version or an install directory, add the environment variable before `bash` at the end of the pipe: `... | WPS365_VERSION=v0.3.6 bash`, `... | WPS365_INSTALL_DIR=~/.local/bin bash`; or download the binary for your platform from the [releases page](https://github.com/wps365-open/cli/releases).
+
+   Then bind an app and authorize (once):
+
+   ```bash
+   wps365-cli config init        # create/bind an app in the browser
    wps365-cli auth login --device
+   wps365-cli user me            # confirm the signed-in identity
    ```
-   If it lives elsewhere, set `cli` in the config below (it accepts `~` and `%NAME%` / `${NAME}` expansion, or a bare command name to look up on `PATH`). **A missing or unauthenticated CLI does not break the plugin**: the skill still loads and states plainly that the CLI was not found.
 
-2. **Python with openpyxl** — needed to read `.xlsx` formulas and to edit cloud spreadsheets. By default the agent uses the interpreter from `load_workspace_dependencies` (that environment ships openpyxl / python-docx); pin your own with `python`.
+   `config init` opens a browser to create/bind the app and confirm the authorization; enterprise admins should set up the CLI app approval exemption in advance, and the full manual flow for creating an app, registering the callback URL, and requesting permissions is in the official [prerequisites guide](https://github.com/wps365-open/cli/blob/main/docs/prerequisites.md). If it lives elsewhere, set `cli` in the config below (it accepts `~` and `%NAME%` / `${NAME}` expansion, or a bare command name to look up on `PATH`). **A missing or unauthenticated CLI does not break the plugin**: the skill still loads and states plainly that the CLI was not found.
 
-3. **A shell tool in the session** — the model runs the scripts through it (`bash` on macOS and Linux, PowerShell or cmd on Windows), plus file reads to page through an exported `doc.md` and `read_image` for pictures.
+3. **Python with openpyxl** — needed to read `.xlsx` formulas and to edit cloud spreadsheets. By default the agent uses the interpreter from `load_workspace_dependencies` (that environment ships openpyxl / python-docx); pin your own with `python`.
 
-4. **Windows** — every command in the skill body is a single line and its placeholders are injected by the plugin, so the same instructions run on both platforms. The injected "本机资源" block states your platform, interpreter, `wps365-cli` path and temp directory. On Windows, quote paths that contain spaces, and install the CLI with `irm https://open-docs.wpscdn.cn/cli/install.ps1 | iex`.
+4. **A shell tool in the session** — the model runs the scripts through it (`bash` on macOS and Linux, PowerShell or cmd on Windows), plus file reads to page through an exported `doc.md` and `read_image` for pictures.
 
-5. **Remove a hand-installed copy of the same skill (important)**
+5. **Windows** — every command in the skill body is a single line and its placeholders are injected by the plugin, so the same instructions run on both platforms. The injected "本机资源" block states your platform, interpreter, `wps365-cli` path and temp directory. On Windows, quote paths that contain spaces.
+
+6. **Remove a hand-installed copy of the same skill (important)**
    If you previously installed this skill by hand at `~/.dsh/skills/wps365-docs`, that copy **wins** over the bundled one (a user-directory skill outranks a bundled skill of the same name), so the plugin's version would never be used. To use the bundled one:
    ```
    rm -rf ~/.dsh/skills/wps365-docs
@@ -113,6 +145,7 @@ A mistyped field fails activation instead of being ignored.
 - **Limits**: 1000 blocks per write for smart documents (the script batches automatically); code-block languages outside the API enum are kept as plain text (`powershell` is silently downgraded — it knows).
 - **Office files go "download → edit locally → upload back"**: `.docx` / `.xlsx` / `.pptx` have no usable per-paragraph write API; preserving formulas, formatting, merges, and multiple sheets depends on uploading the whole file. Cloud `.xlsx` API writes land asynchronously, so verifying by download immediately after writes is misleading.
 - **Permission boundary**: it acts with the identity and permissions of your local `wps365-cli`. The plugin neither stores nor touches credentials.
+- **Account boundary**: WPS 365 enterprise accounts only. Do not use a personal WPS account — the APIs are unavailable and the plugin cannot work.
 - **Context cost**: the always-loaded skill body stays short; detail (17 hard constraints, API specifics, measured concurrency semantics) lives in three reference documents read only when needed.
 - **Upgrading**: a new version of the JS needs a restart; editing only the skill documents (`assets/**`) takes effect on the next skill load.
 - This plugin registers **no** new tools and does not change your MCP configuration; `mcp__wps365__*` (if you configured WPS's MCP server) is a separate capability.
