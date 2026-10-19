@@ -29,6 +29,7 @@ const SCRIPT_NAMES = [
   'otl_fetch.py',
   'otl_write.py',
   'xlsx_edit.py',
+  'dbsheet.py',
 ]
 const SOURCE_TOP_LEVEL = new Set(['plugin.json', '.codex-plugin', 'skills'])
 const FORBIDDEN_PARTS = new Set(['node_modules', '__pycache__', '.git', '.venv', 'venv'])

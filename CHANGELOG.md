@@ -3,6 +3,30 @@
 本文件记录面向使用者的变更；每个版本的细节也同步写在 `README.md` 的「更新记录」一节。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0] - 2026-10-19
+
+### 新增
+
+- **多维表（`.dbt`）记录级读写**：新增 `assets/wps365-docs/scripts/dbsheet.py`，提供 `schema` / `list` / `get` / `create` / `update` / `delete` / `snapshot` / `attachments` 八个子命令。`list` 固定每页 100 条并翻页（接口默认只回 1 条），支持视图、字段选择、`--filter/--filter-file`、`md|cards|json|jsonl` 与 `--raw`；`create` 支持 `--set`、`--records-file`、查重与 `--dry-run`。
+- **写入安全**：`update`/`delete` 必须先 `snapshot` 再传 `--expect-snapshot`；更新只比本次要改的字段，删除比全部字段，schema 变过要求重新快照。写后按 ID 读回，Link/MultipleSelect 比集合、Number 按数值、Date 按格式归一化、Checkbox 按布尔；不一致以退出码 1 报出“写入值 vs 读回值”。`--force` 只跳过冲突检查，不跳过读回。
+- **字段校验与 Link 解析**：SingleSelect/MultipleSelect 先校验选项，非法值直接失败（接口本身会静默清空）；Link 写入把目标表主字段的显示名映射成记录 ID，重名/找不到失败，写后读回；`--set-json` 作为高级逃生口，适合清空选项或确知接口格式的复杂类型。
+- **附件与图片**：从 raw 记录的 `uploadId` 调 `GET /v7/coop/dbsheet/{file_id}/attachments/{uploadId}` 换签名 URL，支持 `--field`、`--images-only`、`--list-only`、`--show-urls`、文件名清洗与去重。实测服务器会把 `.png` 转成 JPEG，脚本按文件头纠正扩展名并打印说明，避免只信后缀。
+- **文档**：新增 `references/dbsheet.md`（15 条硬约束、命令、字段写入规则、附件、结构变更与常见错误）；`SKILL.md` 增加第三条路线、`.dbt` 读写命令、Form 视图与 FlexPaper 限制。Codex 侧同步新增英文 `references/dbsheet.md`，两份 manifest、构建脚本、打包清单与 README 同步到 0.2.0。
+- 版本号升到 `0.2.0`；`package.json` 的 `test` 增加 `test/dbsheet_test.py`，`check-package.mjs` 的必需路径从 23 条增到 25 条。
+
+### 修复
+
+- 查重接口失败时停止创建；`--allow-duplicate` 仅放行已确认的重复记录，不能绕过查询错误。Link 查重将记录 ID 转成显示名再过滤。
+- 批量更新拒绝重复记录 ID，避免后一项静默替换前一项字段；Checkbox 文本 `"0"`/`"false"` 正确显示为未勾选，并按布尔值比较。
+- 日期字段格式含秒时，快照冲突检查和写后读回保留秒精度。
+
+### 验证
+
+- 2026-10-19 修复复测：在 `周报副本.dbt` 的两张临时表上验证创建/读回、Link ID 与显示名查重、实际 HTTP 400 查询错误阻止创建、重复批量 ID 拒绝、Checkbox 文本 `"0"` 显示为未勾选、秒级日期更新/读回/删除冲突，以及新快照允许正常删除。另以原周报表的 Contact 主字段关联做只读查重预演。临时表与记录已清理，原有 9 张表的完整 schema、1,994 条记录与测试前逐条一致。
+- 在 `周报副本.dbt`（含表单、数据表、FlexPaper、附件）上实测：schema 读出 9 张表；`list` 分页、Form 视图回退、Link 显示名过滤、`get`、创建、快照、部分更新、冲突拒绝、`--force`、删除均按预期；附件 `rag系统架构图.png` 实际为 JPEG，脚本改名后字节完整，`xlsx`/`docx` 附件魔数正确。
+- 测试用的临时表与反向 Link 字段已清理：删除 scratch 表后目标表仍残留反向字段（实测），已再用 `field delete` 删除，schema 恢复原状。这条“删源表可能留下反向字段”的坑写进了参考文档。
+- 新增 `test/dbsheet_test.py` 48 例：schema/字段解析、filter 归一化、值转换与日期/选项校验、Link 解析、快照冲突、附件提取/文件名/魔数、分页、渲染、`--set-json` 与本地 `http.server` 下载，以及查重失败不写入、Link ID 查重、重复批量 ID、Checkbox 文本与秒级日期回归。`test/scripts_test.py` 增到 39 例（新增 dbsheet 加入共享 helper 契约、图片魔数测试）。
+
 ## [0.1.4] - 2026-10-16
 
 ### 修复
@@ -79,6 +103,7 @@
 
 - **该版本会让 Harness 无法启动**（原因见 0.1.1 的修复）。它从未发布到 npm；如果需要在配置里引用，请直接使用 0.1.1。
 
+[0.2.0]: https://github.com/YiuTerran/dsh-wps365-plugin/releases/tag/v0.2.0
 [0.1.1]: https://github.com/YiuTerran/dsh-wps365-plugin/releases/tag/v0.1.1
 [0.1.2]: https://github.com/YiuTerran/dsh-wps365-plugin/releases/tag/v0.1.2
 [0.1.0]: https://github.com/YiuTerran/dsh-wps365-plugin/releases/tag/v0.1.0

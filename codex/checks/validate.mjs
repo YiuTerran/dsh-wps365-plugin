@@ -19,6 +19,7 @@ const SCRIPT_NAMES = [
   'otl_fetch.py',
   'otl_write.py',
   'xlsx_edit.py',
+  'dbsheet.py',
 ]
 const FORBIDDEN_PARTS = new Set(['node_modules', '__pycache__', '.git', '.venv', 'venv'])
 const FORBIDDEN_FILE = /^(?:\.env(?:\..*)?|\.npmrc|\.pypirc|credentials?(?:[._-].*)?|secrets?(?:[._-].*)?|.*\.(?:pem|key|p12|pfx|token))$/i
@@ -66,6 +67,20 @@ const SHARED_DOCUMENTS = [
       },
     },
     wholeSections: ['## 为什么有这条专用路线'],
+  },
+  {
+    name: 'dbsheet.md',
+    dsh: join(REPO_DIR, 'assets', 'wps365-docs', 'references', 'dbsheet.md'),
+    codex: join(SOURCE_DIR, 'skills', 'wps365-docs', 'references', 'dbsheet.md'),
+    sections: {
+      // Both sides state the same 15 measured constraints; the Codex copy is
+      // reworded rather than copied, so only the count/presence is compared.
+      '## 15 条硬约束（按实测，v0.3.6）': {
+        shared: [],
+        adapted: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+      },
+    },
+    wholeSections: [],
   },
   {
     name: 'concurrency.md',

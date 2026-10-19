@@ -38,6 +38,7 @@ sys.path.insert(0, SCRIPTS)
 
 import _wps_cli  # noqa: E402
 import file_fetch  # noqa: E402
+import otl_fetch  # noqa: E402
 import otl_write  # noqa: E402
 import xlsx_edit  # noqa: E402
 
@@ -191,7 +192,8 @@ class LegacyXlsGuardTest(unittest.TestCase):
 
 class EveryScriptSharesTheHelper(unittest.TestCase):
     #: Scripts that talk to wps365-cli and must therefore go through `run_cli`.
-    CLI_CALLERS = ("otl_fetch.py", "otl_write.py", "file_fetch.py", "file_write.py")
+    CLI_CALLERS = ("otl_fetch.py", "otl_write.py", "file_fetch.py", "file_write.py",
+                   "dbsheet.py")
 
     def test_cli_callers_do_not_call_subprocess_directly(self):
         offenders = []
@@ -211,6 +213,17 @@ class EveryScriptSharesTheHelper(unittest.TestCase):
             body = fh.read()
         self.assertIn("subprocess.run(", body)
         self.assertIn("encoding=CLI_ENCODING", body)
+
+
+class ImageMagicTest(unittest.TestCase):
+    """Attachment URLs may serve a different image format than the filename says."""
+
+    def test_guess_ext_sniffs_content_not_names(self):
+        self.assertEqual(otl_fetch.guess_ext(b"\x89PNG\r\n\x1a\n0000"), ".png")
+        self.assertEqual(otl_fetch.guess_ext(b"\xff\xd8\xff\xe00000"), ".jpg")
+        self.assertEqual(otl_fetch.guess_ext(b"RIFF0000WEBP0000"), ".webp")
+        self.assertEqual(otl_fetch.guess_ext(b"GIF89a0000"), ".gif")
+        self.assertEqual(otl_fetch.guess_ext(b"not an image"), ".bin")
 
 
 class FindKitTest(unittest.TestCase):

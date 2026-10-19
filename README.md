@@ -25,10 +25,13 @@
 | "读一下这个 .docx / .xlsx / .pptx" | 下载原件到本地，并抽出正文 Markdown、表格、**公式原文**、每个工作表一份 CSV |
 | "把附件里的这个表格改一下再传回去" | 本地编辑后整文件传回：`file_id` 与分享链接不变，版本历史保留、可回滚；也能新建文件 |
 | "把云端表格里 B2 改成 99，D2 加上公式" | 云端 `.xlsx` 一条龙：下载 → 改 → 重算公式缓存值 → 传回，一条命令完成 |
+| "把这个多维表里的周报列出来" / "按项目筛一下" | 读多维表（`.dbt`）：先看 schema，再分页/过滤读记录；支持视图、字段选择、附件清单，Form 视图会提示改读底层表 |
+| "把这条记录的备注改掉" | 快照 → 部分更新 → 读回校验；Link/选项非法值会被接口静默清空，脚本会先校验、写后比对并明确报错 |
+| "把周报里那张图下载下来" | 从 raw 记录取 `uploadId` 下载附件；按文件头纠正扩展名（实测服务器会把 PNG 转成 JPEG） |
 | "这是别人分享给我的链接，帮我读一下" | 从 kdocs / plus 分享链接解析出文档并正常读取（无需"接收文件"这类前置动作） |
 | "帮我把这份文档改一下" | **写入前先比对云端是否已被他人修改**；发现冲突就停下、告诉你冲突在哪，绝不静默覆盖 |
 
-它内置了这套流程里踩过的坑（17 条智能文档硬约束、普通文件接口细节、并发写入的实测语义），所以遇到"表格整块消失""公式变成空值""代码块语言被降级""写完下载还是旧内容"这类问题，它知道该怎么绕。
+它内置了这套流程里踩过的坑（17 条智能文档硬约束、15 条多维表硬约束、普通文件接口细节、并发写入的实测语义），所以遇到"表格整块消失""公式变成空值""代码块语言被降级""写完下载还是旧内容""多维表写入成功但字段空了"这类问题，它知道该怎么绕。
 
 ## 需要先准备什么
 
@@ -127,7 +130,7 @@ npm --prefix codex run build
 npm --prefix codex test
 ```
 
-构建需要 Node.js 22 或更高版本；生成 `.tar.gz` 归档还需要系统提供 `tar` 命令。无需运行 `npm install`，构建和检查使用 Node.js 内置模块。构建会生成完整插件目录 `codex/dist/wps365-docs/` 和归档 `codex/dist/wps365-docs-0.1.2.tar.gz`。请把**构建生成的目录**注册并安装；`codex/wps365-docs/` 是源码，不含构建复制进去的共享 Python 脚本，不能直接作为完整插件安装。
+构建需要 Node.js 22 或更高版本；生成 `.tar.gz` 归档还需要系统提供 `tar` 命令。无需运行 `npm install`，构建和检查使用 Node.js 内置模块。构建会生成完整插件目录 `codex/dist/wps365-docs/` 和归档 `codex/dist/wps365-docs-0.2.0.tar.gz`。请把**构建生成的目录**注册并安装；`codex/wps365-docs/` 是源码，不含构建复制进去的共享 Python 脚本，不能直接作为完整插件安装。
 
 在 Codex 中可以这样请求安装：
 
@@ -173,13 +176,14 @@ Codex 使用本地执行环境运行 Python 脚本和 `wps365-cli`。处理 `.xl
 ## 使用时的注意事项
 
 - **云文档没有本地撤销**：插件会按技能要求先导出备份，但重要文档建议你自己也留一份。
-- **写入超时不等于写入失败**：智能文档的写入接口可能已在服务端提交只是响应没回来，所以它重试前会先查块数，避免写两遍。
+- **写入超时不等于写入失败**：智能文档的写入接口、多维表的创建接口都可能已在服务端提交只是响应没回来，所以它重试前会先查块数/记录数，避免写两遍。
 - **写入前一定要看冲突结论**：它报冲突时，正确做法是重新拉最新版本、合并你的改动后再写；确实要覆盖才会用强制参数。
-- **规模上限**：智能文档单次写入 1000 块（脚本自动分批）；代码块语言只有接口枚举内的才保留（写 `powershell` 会被静默降级成纯文本，它知道这件事）。
+- **规模上限**：智能文档单次写入 1000 块（脚本自动分批）；多维表单请求最多 1024 条、限流约 10 次/秒（脚本单批 100）；代码块语言只有接口枚举内的才保留（写 `powershell` 会被静默降级成纯文本，它知道这件事）。
 - **普通文件走"下载 → 本地改 → 传回"**：`.docx` / `.xlsx` / `.pptx` 没有可用的逐段写接口，公式、格式、合并、多工作表全靠整文件传回保住。云端 `.xlsx` 的接口写入是异步落盘的，写完不要立刻下载校验。
+- **多维表是数据库，不是文档/文件夹**：`drive file list` 会返回空、`file-content` 会报"文档内容抽取失败"；只能走 dbsheet schema/records。FlexPaper 工作表读不了正文/记录，Form 视图不承载记录。
 - **权限边界**：它用你本机 `wps365-cli` 的身份和权限操作云文档，能读写的就是那个账号能读写的东西；插件自己不保存、也不接触凭据。
 - **账号边界**：只支持 WPS 365 企业版账号；WPS 个人版账号请勿使用，接口不可用，插件无法工作。
-- **上下文开销**：技能正文保持精简，细节（17 条硬约束、接口细节、并发实测语义）放在三份按需读取的参考文档里，只有真需要时才读。
+- **上下文开销**：技能正文保持精简，细节（17 条智能文档 + 15 条多维表硬约束、接口细节、并发实测语义）放在四份按需读取的参考文档里，只有真需要时才读。
 - **升级**：换版本需要重启 Harness 才会加载新的 JS；只改技能文档（`assets/**`）的话，下次加载技能即生效。
 - 本插件**不注册**任何新工具、也不改动你 profile 里的 MCP 配置；`mcp__wps365__*`（如果你配了 WPS 的 MCP）与它是两套独立能力。
 
@@ -189,12 +193,13 @@ Codex 使用本地执行环境运行 Python 脚本和 `wps365-cli`。处理 `.xl
 
 ```bash
 node --test                        # Node 侧用例：技能解析/资源预算、bundle 与补丁结构、apply() 契约、配置校验、CLI 定位
-python3 test/scripts_test.py       # Python 侧用例：CLI 定位、管道解码、LibreOffice kit 探测（纯标准库）
+python3 test/scripts_test.py       # Python 侧契约用例：CLI 定位、管道解码、LibreOffice kit 探测（纯标准库）
+python3 test/dbsheet_test.py       # 多维表纯函数与离线下载用例（本地 http.server，不碰云）
 node --check index.js
 python3 -m py_compile assets/wps365-docs/scripts/*.py
 ```
 
-`npm test` 会依次跑前两条；CI 在 Linux 上跑（Windows 语义由注入的假环境覆盖，不依赖真机）。
+`npm test` 会依次跑这三条；CI 在 Linux 上跑（Windows 语义由注入的假环境覆盖，不依赖真机）。
 
 真实验证：让 agent 读一篇你确定有权限的文档，问它"这篇文档的标题是什么、有几个表格"，确认拿到的是真实内容；再让它用 `--dry-run` 写一次（只做转换、不写入、不产生文件），看块结构与比对输出是否符合预期，然后才动真文档。
 
@@ -207,11 +212,11 @@ src/skill-catalog.js          # 纯函数：解析技能 frontmatter、构造 ca
 src/cli-locate.js             # 纯函数：跨平台定位 wps365-cli（PATHEXT、PATH、~ / %VAR% 展开）
 cordis.patch.yml              # bundle patch：插入 skill-wps365-docs 行
 assets/wps365-docs/
-├── SKILL.md                  # 常驻正文（约 3.4k 字符，控制在 8192 的修剪阈值内）
-├── references/               # otl.md / office-files.md / concurrency.md，按需读取
-└── scripts/                  # otl_fetch.py otl_write.py file_fetch.py file_write.py xlsx_edit.py
-                              # _wps_cli.py：五个脚本共用的 CLI 定位 + UTF-8 管道封装
-locale/{en,zh}.json  icon.svg  test/   # test/scripts_test.py 是 Python 侧用例，npm test 会跑
+├── SKILL.md                  # 常驻正文（约 5k 字符，控制在 8192 的修剪阈值内）
+├── references/               # otl.md / office-files.md / dbsheet.md / concurrency.md，按需读取
+└── scripts/                  # otl_fetch.py otl_write.py file_fetch.py file_write.py xlsx_edit.py dbsheet.py
+                              # _wps_cli.py：六个脚本共用的 CLI 定位 + UTF-8 管道封装
+locale/{en,zh}.json  icon.svg  test/   # test/scripts_test.py + test/dbsheet_test.py，npm test 会跑
 scripts/check-package.mjs     # 校验 npm 打包内容（CI 也会跑）
 scripts/clean-bytecode.mjs    # prepack：清掉跑脚本留下的 __pycache__
 .github/workflows/            # ci.yml 跑测试与打包检查；release.yml 打 tag 时发布 npm
@@ -225,6 +230,7 @@ codex/                        # Codex 本地插件适配；构建与安装说明
 
 ## 更新记录
 
+- **0.2.0** — 新增**多维表（`.dbt`）**支持：`dbsheet.py` 提供 schema / 分页过滤读 / 单条读 / 创建 / 快照 / 部分更新 / 删除 / 附件下载，写入前按记录级快照比对、写后逐字段读回；Link 显示名自动映射成记录 ID，非法选项/日期先校验，附件按 `uploadId` 换取签名 URL 并按文件头纠正扩展名（实测 PNG 实为 JPEG）。同步补上 15 条多维表硬约束与 Form/FlexPaper 限制，Codex 适配、打包清单和 README 均已更新。详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.1.4** — 修正 `.xlsx` 写回读回校验：重复设置同一单元格时只校验最后一次赋值，布尔值、文本引号与空白按实际写入类型比较，清空单元格时正确接受稀疏空响应。详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.1.3** — 修掉一个**会静默骗人的写入失败**：`.xlsx` 的字节覆盖对「在线表格」不生效（版本号与字节都更新了，线上单元格却仍是旧值）。`xlsx_edit.py` 现在上传后会读回自己用 `--set` 写过的单元格，不一致就以退出码 1 明确失败并说明下一步；纯字节文件不受影响。文档同步补上这条硬约束（含实测数据）与 `versions` 接口必须带 `page_size` 等复测结论；Python 侧测试增到 34 例。详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.1.2** — 包含 Windows 支持与修复：CLI 按平台发现、脚本统一使用 UTF-8 管道与输出，Windows 上可定位 LibreOffice kit 和 Node，并给伪装成 `.xlsx` 的 `.xls` 提供可操作提示。Python 侧测试现为 27 例。另修复并发写入未检测块顺序变化、默认配置漏查 `PATH`，以及 Node 缺失时误用 Python 解释器启动的问题；详见 [CHANGELOG.md](CHANGELOG.md)。

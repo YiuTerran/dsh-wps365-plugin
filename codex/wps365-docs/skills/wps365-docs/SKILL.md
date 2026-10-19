@@ -1,6 +1,6 @@
 ---
 name: wps365-docs
-description: Read, summarize, inspect, or edit WPS 365 cloud smart documents and Office files using the local wps365-cli. Use for .otl / AirPage documents, shared WPS links, and .docx, .xlsx, or .pptx files; preserve cloud changes with explicit conflict checks before writing.
+description: Read, summarize, inspect, or edit WPS 365 cloud smart documents, Office files, and multi-dimensional tables using the local wps365-cli. Use for .otl / AirPage documents, shared WPS links, .docx, .xlsx, or .pptx files, and .dbt records; preserve cloud changes with explicit conflict checks before writing.
 ---
 
 # WPS 365 cloud documents
@@ -44,8 +44,9 @@ If wps365-cli is missing, stop before cloud operations and explain that the user
 |---|---|---|
 | Smart document .otl / AirPage | otl_fetch.py | otl_write.py, with block snapshots and a dry run as appropriate |
 | Ordinary .docx, .xlsx, .pptx | file_fetch.py | Edit the downloaded original with an available Office skill, then file_write.py with its baseline |
+| Multi-dimensional table .dbt | dbsheet.py schema/list/get | dbsheet.py create/update/delete, with record snapshots and a read-back |
 
-These write paths have different semantics. Smart documents expose block operations; Office files are replaced as complete byte streams. Do not use one path as a substitute for the other.
+These write paths have different semantics. Smart documents expose block operations; Office files are replaced as complete byte streams; a .dbt is a database and only supports record-level operations. Do not use one path as a substitute for another, and do not try to extract a .dbt body or list it as a folder.
 
 ⚠️ One exception matters: a **byte upload is not adopted for an online spreadsheet** that already has a server-side content model. The version and the stored bytes both advance while the live cells keep their old values, so the write looks successful and is not. Read the cells you wrote back with the sheets API before reporting success (xlsx_edit.py does this for `--set`, then fails with exit code 1 when nothing was adopted); to change an online spreadsheet, use the cell/formula endpoints in references/office-files.md or let the user paste the values.
 
@@ -69,6 +70,11 @@ PowerShell form:
 
     & "{python}" "{skillDir}\scripts\file_fetch.py" --file-id <file_id> --out "{tmp}\wps_<short-name>" --download --cli "{cli}"
 
+For a multi-dimensional table, read the schema first and then page through records. A .dbt is not a folder and its body cannot be extracted: `drive file list` returns nothing and `file-content` fails with "文档内容抽取失败". Form views do not carry records; FlexPaper sheets have no readable records or body. See references/dbsheet.md.
+
+    "{python}" "{skillDir}/scripts/dbsheet.py" schema --file-id <file_id> --out "{tmp}/dbt_schema.json" --cli "{cli}"
+    "{python}" "{skillDir}/scripts/dbsheet.py" list --file-id <file_id> --sheet <sheet-name-or-id> --max-records 50 --cli "{cli}"
+
 Read doc.md for extracted text and tables, and inspect meta.json for the cloud file baseline. For .xlsx, local parsing with openpyxl preserves formula text in the extracted view; API-only values may omit formulas or display rounded values. Use the locally downloaded original for Office edits.
 
 If the user provides a WPS sharing link instead of a file_id, obtain its link_id from the final path segment and resolve the metadata with the local CLI. Then use the returned file_id with the appropriate fetch script:
@@ -85,15 +91,17 @@ Cloud documents are collaborative. Establish a baseline before editing, save a l
 
 - For .otl, list blocks and save a snapshot covering the blocks the change depends on. A replace operation clears and rebuilds the document, so it requires a whole-document comparison even if a narrower scope was recorded. Never use drive-level hash/version as an .otl concurrency check; that metadata can lag behind live block changes.
 - For .docx, .xlsx, and .pptx, record the cloud file's SHA-1 hash and version before editing and pass both as --expect-hash and --expect-version when writing. Keep a local backup because the upload API does not provide a dependable rollback path.
+- For .dbt, there is no record-level version. Save a record snapshot, pass --expect-snapshot, and let the script read back the written fields. Updates compare only the fields supplied; deletes compare every field. A schema change invalidates the snapshot.
 - Never infer success from a timeout. A smart-document create request may have committed even if the response timed out. Fetch the document and inspect its blocks before considering a retry; otherwise duplicate content may be inserted.
 - A successful write may not immediately appear in drive-level metadata or a downloaded binary. Check that the cloud version has advanced before using a download as verification.
 
-The three reference files contain the detailed rules and tested API behavior. Read only the one needed for the current operation:
+The four reference files contain the detailed rules and tested API behavior. Read only the one needed for the current operation:
 
 | Topic | Reference |
 |---|---|
 | Smart-document read/write, shared links, and content fidelity | {skillDir}/references/otl.md |
 | Office file download/edit/upload and format limitations | {skillDir}/references/office-files.md |
+| Multi-dimensional table records, snapshots, attachments, and 15 hard constraints | {skillDir}/references/dbsheet.md |
 | Snapshot, hash, conflict, and concurrency behavior | {skillDir}/references/concurrency.md |
 
 ## Edit and write a smart document
@@ -119,6 +127,18 @@ The reliable flow is: fetch the original and save a local backup, record the clo
 For Windows, use the same arguments and paths with PowerShell's call operator, for example & "{python}" "{skillDir}\scripts\file_write.py" ... --cli "{cli}".
 
 New .docx creation from Markdown has limited fidelity: headings, basic lists, tables, and bold text are supported, while images, nested lists, footnotes, full hyperlink styling, and some quote/code styling are not preserved as rich Word structures. For faithful Office edits, edit a fetched original with the appropriate Office skill and upload the complete file.
+
+## Edit a multi-dimensional table
+
+Use --set for normal values and a snapshot for every update or delete. Never trust a successful write: SingleSelect, MultipleSelect, and Link values that are invalid are silently cleared, so the script reads the record back and exits 1 on any mismatch. Link writes need record IDs (the script maps display names); Link filters need display names. Dates must be `YYYY/MM/DD` or `YYYY-MM-DD`. Attachment fields are read-only and have no upload endpoint.
+
+    "{python}" "{skillDir}/scripts/dbsheet.py" snapshot --file-id <file_id> --sheet <sheet> --record <record_id> --out "{tmp}/snap.json" --cli "{cli}"
+    "{python}" "{skillDir}/scripts/dbsheet.py" update --file-id <file_id> --sheet <sheet> --record <record_id> --set "field=value" --expect-snapshot "{tmp}/snap.json" --cli "{cli}"
+    "{python}" "{skillDir}/scripts/dbsheet.py" delete --file-id <file_id> --sheet <sheet> --record <record_id> --expect-snapshot "{tmp}/snap.json" --cli "{cli}"
+
+Creating records is not idempotent: after a timeout, list/search for the record before retrying, or it may be created twice. A create batch is all-or-nothing and is capped at 1024 records per request (the script caps a batch at 100). Do not use --force unless the user explicitly authorizes overwriting the identified conflict.
+
+Attachments are downloaded from raw records with `dbsheet.py attachments --out <dir>`; `--images-only` filters images. The server may transcode an image, so the script checks the file header and corrects the extension. Use the image-view capability only if the current model supports image input; otherwise report size/format/dimensions rather than claiming to have seen it.
 
 ## Safety and verification
 

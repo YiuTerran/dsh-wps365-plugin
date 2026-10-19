@@ -31,6 +31,7 @@ const REQUIRED = [
   'assets/wps365-docs/SKILL.md',
   'assets/wps365-docs/references/otl.md',
   'assets/wps365-docs/references/office-files.md',
+  'assets/wps365-docs/references/dbsheet.md',
   'assets/wps365-docs/references/concurrency.md',
   'assets/wps365-docs/scripts/_wps_cli.py',
   'assets/wps365-docs/scripts/otl_fetch.py',
@@ -38,6 +39,7 @@ const REQUIRED = [
   'assets/wps365-docs/scripts/file_fetch.py',
   'assets/wps365-docs/scripts/file_write.py',
   'assets/wps365-docs/scripts/xlsx_edit.py',
+  'assets/wps365-docs/scripts/dbsheet.py',
   'locale/en.json',
   'locale/zh.json',
 ]

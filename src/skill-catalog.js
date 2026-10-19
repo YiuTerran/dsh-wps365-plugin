@@ -30,6 +30,7 @@ export const SKILL_SCRIPTS = [
   'file_fetch.py',
   'file_write.py',
   'xlsx_edit.py',
+  'dbsheet.py',
 ]
 
 /**

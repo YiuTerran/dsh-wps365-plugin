@@ -1,14 +1,14 @@
 {
   "name": "wps365-docs",
-  "version": "0.1.4",
-  "description": "通过本机 wps365-cli 读取和编辑 WPS 365 智能文档及 Office 文件，并在云端写入前检查冲突。",
+  "version": "0.2.0",
+  "description": "通过本机 wps365-cli 读取和编辑 WPS 365 智能文档、Office 文件及多维表（.dbt），并在云端写入前检查冲突。",
   "author": {
     "name": "tryao"
   },
   "interface": {
     "displayName": "WPS 365 文档",
     "shortDescription": "读取和编辑 WPS 365 文档",
-    "longDescription": "通过本机 wps365-cli 读取和写入 WPS 365 智能文档及 Office 文件。写入前检查文档快照或文件版本，发现冲突时停止并报告。",
+    "longDescription": "通过本机 wps365-cli 读取和写入 WPS 365 智能文档、Office 文件及多维表记录。写入前检查文档快照、文件版本或记录快照，发现冲突时停止并报告。",
     "developerName": "tryao",
     "category": "Productivity",
     "capabilities": [
@@ -20,7 +20,8 @@
     "defaultPrompt": [
       "读取这篇 WPS 文档并概括重点：<分享链接或 file_id>",
       "检查这份 WPS 智能文档中的待办事项：<分享链接或 file_id>",
-      "把这个本地 Office 文件中的指定内容更新到 WPS 云文档：<说明>"
+      "把这个本地 Office 文件中的指定内容更新到 WPS 云文档：<说明>",
+      "读取这张多维表的记录并总结：<分享链接或 file_id>"
     ]
   },
   "skills": "./skills/",

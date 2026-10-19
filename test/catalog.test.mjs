@@ -58,14 +58,14 @@ test('rendered skill body stays inside the 8192-code-point pruner budget', () =>
 test('the body keeps the mandatory conflict-check rule and points at the references', () => {
   const body = parseSkillMarkdown(readFileSync(SKILL_PATH, 'utf8'), SKILL_PATH).content
   assert.ok(body.includes('写入前必须比对'), 'the conflict rule must stay in the always-loaded body')
-  for (const reference of ['references/otl.md', 'references/office-files.md', 'references/concurrency.md']) {
+  for (const reference of ['references/otl.md', 'references/office-files.md', 'references/dbsheet.md', 'references/concurrency.md']) {
     assert.ok(body.includes(reference), `body should link ${reference}`)
     assert.ok(statSync(new URL(`../assets/wps365-docs/${reference}`, import.meta.url)).isFile())
   }
 })
 
 test('every reference also fits the pruner budget, since it is read as a tool result', () => {
-  for (const reference of ['references/otl.md', 'references/office-files.md', 'references/concurrency.md']) {
+  for (const reference of ['references/otl.md', 'references/office-files.md', 'references/dbsheet.md', 'references/concurrency.md']) {
     const text = readFileSync(new URL(`../assets/wps365-docs/${reference}`, import.meta.url), 'utf8')
     const codePoints = [...text].length
     assert.ok(codePoints < 8192, `${reference} is ${codePoints} code points`)

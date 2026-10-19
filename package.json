@@ -1,7 +1,7 @@
 {
   "name": "@tryao/dsh-wps365-plugin",
-  "version": "0.1.4",
-  "description": "Bundle that ships the wps365-docs skill (read and write WPS 365 cloud documents) for the DeepSeek Harness",
+  "version": "0.2.0",
+  "description": "Bundle that ships the wps365-docs skill (read and write WPS 365 cloud documents, Office files, and dbsheet multi-dimensional tables) for the DeepSeek Harness",
   "type": "module",
   "icon": "./icon.svg",
   "main": "./index.js",
@@ -44,13 +44,15 @@
     "kdocs",
     "otl",
     "docx",
-    "xlsx"
+    "xlsx",
+    "dbt",
+    "dbsheet"
   ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "test": "node --test && python3 test/scripts_test.py",
+    "test": "node --test && python3 test/scripts_test.py && python3 test/dbsheet_test.py",
     "check:pack": "node scripts/check-package.mjs",
     "prepack": "node scripts/clean-bytecode.mjs"
   },

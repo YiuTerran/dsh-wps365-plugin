@@ -25,10 +25,13 @@ Once installed there is no more exporting, re-uploading, or copy-paste: ask the 
 | "Read this .docx / .xlsx / .pptx" | Download the original and extract body Markdown, tables, **original formulas**, and one CSV per worksheet |
 | "Fix the spreadsheet in this attachment and put it back" | Edit locally and upload the whole file back: `file_id` and share link stay the same, version history is kept and can be reverted; it can create new files too |
 | "Set B2 to 99 in the cloud spreadsheet and add a formula in D2" | One-command cloud `.xlsx` round trip: download → edit → recalculate formula cache → upload |
+| "List the weekly reports in this multi-dimensional table" / "Filter by project" | Read a multi-dimensional table (`.dbt`): inspect the schema, then page/filter records; views, field selection, attachment inventories. Form views warn and fall back to the underlying table |
+| "Change the notes on this record" | Snapshot → partial update → read-back verification; invalid Link/select values are silently cleared by the API, so the script validates first and reports mismatches |
+| "Download the diagram from that weekly report" | Resolve the attachment `uploadId` from raw records and download it; correct the extension from the file header (the server was observed transcoding PNG to JPEG) |
 | "Here is a link someone shared with me, read it" | Resolve kdocs / plus share links into a document and read it normally |
 | "Update this document for me" | **Compare the cloud state before writing**: on a conflict it stops and tells you what changed instead of silently overwriting |
 
-It also carries the hard-won lessons of this workflow (17 hard constraints for smart documents, the office-file API details, measured concurrency semantics), so problems like "my table disappeared", "formulas turned into empty cells", "the code block language was downgraded", or "the download still shows the old content" are handled instead of stumbled into.
+It also carries the hard-won lessons of this workflow (17 hard constraints for smart documents, 15 for multi-dimensional tables, the office-file API details, measured concurrency semantics), so problems like "my table disappeared", "formulas turned into empty cells", "the code block language was downgraded", "the download still shows the old content", or "the record write succeeded but the field is empty" are handled instead of stumbled into.
 
 ## Before you start
 
@@ -140,13 +143,14 @@ A mistyped field fails activation instead of being ignored.
 ## Things to keep in mind
 
 - **Cloud documents have no local undo**: the skill exports a backup before writing, but keep your own copy of anything important.
-- **A write timeout is not a failed write**: the smart-document API may have committed while the response was lost, so it checks the block count before retrying rather than writing twice.
+- **A write timeout is not a failed write**: the smart-document and record-create APIs may have committed while the response was lost, so it checks the block/record count before retrying rather than writing twice.
 - **Read the conflict verdict**: when it reports a conflict, the right move is to pull the latest version and merge; forcing an overwrite takes an explicit flag.
-- **Limits**: 1000 blocks per write for smart documents (the script batches automatically); code-block languages outside the API enum are kept as plain text (`powershell` is silently downgraded — it knows).
+- **Limits**: 1000 blocks per write for smart documents (the script batches automatically); 1024 records per dbsheet request and about 10 requests/second (the script caps a batch at 100); code-block languages outside the API enum are kept as plain text (`powershell` is silently downgraded — it knows).
 - **Office files go "download → edit locally → upload back"**: `.docx` / `.xlsx` / `.pptx` have no usable per-paragraph write API; preserving formulas, formatting, merges, and multiple sheets depends on uploading the whole file. Cloud `.xlsx` API writes land asynchronously, so verifying by download immediately after writes is misleading.
+- **A multi-dimensional table is a database, not a document or folder**: `drive file list` returns nothing and `file-content` fails with "文档内容抽取失败"; use dbsheet schema/records. FlexPaper sheets have no readable body/records, and Form views do not carry records.
 - **Permission boundary**: it acts with the identity and permissions of your local `wps365-cli`. The plugin neither stores nor touches credentials.
 - **Account boundary**: WPS 365 enterprise accounts only. Do not use a personal WPS account — the APIs are unavailable and the plugin cannot work.
-- **Context cost**: the always-loaded skill body stays short; detail (17 hard constraints, API specifics, measured concurrency semantics) lives in three reference documents read only when needed.
+- **Context cost**: the always-loaded skill body stays short; detail (17 smart-document + 15 multi-dimensional-table hard constraints, API specifics, measured concurrency semantics) lives in four reference documents read only when needed.
 - **Upgrading**: a new version of the JS needs a restart; editing only the skill documents (`assets/**`) takes effect on the next skill load.
 - This plugin registers **no** new tools and does not change your MCP configuration; `mcp__wps365__*` (if you configured WPS's MCP server) is a separate capability.
 
@@ -155,7 +159,9 @@ A mistyped field fails activation instead of being ignored.
 Offline self-check (no Harness, no network, no access to your documents):
 
 ```bash
-node --test          # 30 cases: skill parsing and asset budgets, bundle/patch structure, apply() contract, config
+node --test                    # skill parsing and asset budgets, bundle/patch structure, apply() contract, config
+python3 test/scripts_test.py   # CLI discovery, pipe decoding, LibreOffice kit detection (stdlib only)
+python3 test/dbsheet_test.py   # dbsheet pure functions + an offline loopback download; no cloud calls
 node --check index.js
 python3 -m py_compile assets/wps365-docs/scripts/*.py
 ```
@@ -170,9 +176,9 @@ src/plugin-config.js          # config validation (hand-written Standard Schema 
 src/skill-catalog.js          # pure helpers: frontmatter parsing, catalog entry, local-resource block
 cordis.patch.yml              # bundle patch inserting the skill-wps365-docs row
 assets/wps365-docs/
-├── SKILL.md                  # always-loaded body (~3.4k chars, kept under the 8192 pruning threshold)
-├── references/               # otl.md / office-files.md / concurrency.md, read on demand
-└── scripts/                  # otl_fetch.py otl_write.py file_fetch.py file_write.py xlsx_edit.py
+├── SKILL.md                  # always-loaded body (~5k chars, kept under the 8192 pruning threshold)
+├── references/               # otl.md / office-files.md / dbsheet.md / concurrency.md, read on demand
+└── scripts/                  # otl_fetch.py otl_write.py file_fetch.py file_write.py xlsx_edit.py dbsheet.py
 locale/{en,zh}.json  icon.svg  test/
 scripts/check-package.mjs     # verifies the npm tarball contents (CI runs it too)
 .github/workflows/            # ci.yml runs tests + the tarball check; release.yml publishes on a tag
@@ -185,6 +191,7 @@ The package is published to npm (`publishConfig.access: public`). The release pr
 
 ## Changelog
 
+- **0.2.0** — Adds **multi-dimensional table (`.dbt`) support**: `dbsheet.py` covers schema, paginated/filtered reads, single-record reads, create, snapshot, partial update, delete, and attachment download. Writes compare a record-level snapshot and read every field back; Link display names are resolved to record IDs, invalid select/date values are validated first, and attachments resolve `uploadId` to a signed URL and correct the extension from the file header (an observed PNG was actually JPEG). Also ships 15 measured .dbt constraints and the Form/FlexPaper limits, with matching Codex adapter, package manifest, and README updates. See [CHANGELOG.md](CHANGELOG.md).
 - **0.1.4** — Fixes `.xlsx` write-back verification for repeated cell assignments, booleans, quoted/whitespace text, and clearing cells with sparse API responses. See [CHANGELOG.md](CHANGELOG.md).
 - **0.1.3** — Fixes a **write that fails while looking successful**: byte-uploading an `.xlsx` is not adopted by an online spreadsheet (the version and the stored bytes both advance, the live cells keep their old values). `xlsx_edit.py` now reads back the cells it wrote through `--set` and exits 1 with the reason and the next step when they do not match; pure byte files are unaffected. The docs gain that hard constraint with the measurements, plus re-tested `versions` notes (`page_size` is required). The Python suite is now 34 tests. See [CHANGELOG.md](CHANGELOG.md).
 - **0.1.2** — Adds Windows support and fixes: platform-aware CLI discovery, UTF-8 CLI pipes and script output, Windows discovery for the LibreOffice kit and Node, and an actionable message for legacy `.xls` files renamed to `.xlsx`. The Python suite now has 27 tests. Also detects block reordering during concurrent writes, searches `PATH` when the CLI setting is omitted, and no longer tries to launch Python as Node when Node is missing. See [CHANGELOG.md](CHANGELOG.md).
