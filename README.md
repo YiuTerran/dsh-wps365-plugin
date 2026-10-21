@@ -71,6 +71,8 @@
 
    `config init` 会打开浏览器完成应用创建/绑定与授权确认；企业管理员建议预先设置 CLI 应用免审规则，手动创建应用、配置回调地址与申请权限的完整流程见官方[前置准备：创建应用与权限配置](https://github.com/wps365-open/cli/blob/main/docs/prerequisites.md)。装在别处就在配置里指定 `cli`（见下；支持 `~` 与 `%NAME%`/`${NAME}` 展开，也可以直接写裸命令名让它在 `PATH` 里找）。**CLI 缺失或未授权不会让插件失效**：技能照常可用，只是会在技能正文里明确告诉你 CLI 没找到。
 
+   **授权有效期**：access token 只有 2 小时，但 CLI 会在过期前自动刷新、401 透明重试；delegated refresh token 有效 **365 天**且每次刷新轮换。正常情况下 `auth login --device` 一年一次，不必每 2 小时重新登录。refresh token 过期/被撤销、token 存储丢失，或 CLI 回退到 app 身份后报 `required delegated scopes` 时，插件脚本会自动 `auth refresh --delegated`，失败则运行 `auth login --device` 打开浏览器并重试一次；不想自动弹窗可设 `WPS365_NO_AUTO_LOGIN=1`。直接调用 CLI 前也可手动执行 `python3 <技能目录>/scripts/auth.py ensure --cli <cli>`。不要设置 `WPS365_ACCESS_TOKEN`，它会绕过刷新，2 小时后必然失效。官方依据：[用户授权流程](https://open.wps.cn/documents/app-integration-dev/wps365/server/certification-authorization/user-authorization/flow.html)（refresh_token 365 天、刷新时轮换）与 [CLI 认证说明](https://github.com/wps365-open/cli#认证)（自动刷新与 401 重试）。
+
 3. **Python（带 openpyxl）**
    读 `.xlsx` 的公式、以及云端改表格需要 openpyxl。默认让 agent 用 `load_workspace_dependencies` 返回的解释器（该环境自带 openpyxl / python-docx）；想固定一个就在配置里指定 `python`。
 
@@ -130,7 +132,7 @@ npm --prefix codex run build
 npm --prefix codex test
 ```
 
-构建需要 Node.js 22 或更高版本；生成 `.tar.gz` 归档还需要系统提供 `tar` 命令。无需运行 `npm install`，构建和检查使用 Node.js 内置模块。构建会生成完整插件目录 `codex/dist/wps365-docs/` 和归档 `codex/dist/wps365-docs-0.2.0.tar.gz`。请把**构建生成的目录**注册并安装；`codex/wps365-docs/` 是源码，不含构建复制进去的共享 Python 脚本，不能直接作为完整插件安装。
+构建需要 Node.js 22 或更高版本；生成 `.tar.gz` 归档还需要系统提供 `tar` 命令。无需运行 `npm install`，构建和检查使用 Node.js 内置模块。构建会生成完整插件目录 `codex/dist/wps365-docs/` 和归档 `codex/dist/wps365-docs-0.2.1.tar.gz`。请把**构建生成的目录**注册并安装；`codex/wps365-docs/` 是源码，不含构建复制进去的共享 Python 脚本，不能直接作为完整插件安装。
 
 在 Codex 中可以这样请求安装：
 
@@ -181,6 +183,7 @@ Codex 使用本地执行环境运行 Python 脚本和 `wps365-cli`。处理 `.xl
 - **规模上限**：智能文档单次写入 1000 块（脚本自动分批）；多维表单请求最多 1024 条、限流约 10 次/秒（脚本单批 100）；代码块语言只有接口枚举内的才保留（写 `powershell` 会被静默降级成纯文本，它知道这件事）。
 - **普通文件走"下载 → 本地改 → 传回"**：`.docx` / `.xlsx` / `.pptx` 没有可用的逐段写接口，公式、格式、合并、多工作表全靠整文件传回保住。云端 `.xlsx` 的接口写入是异步落盘的，写完不要立刻下载校验。
 - **多维表是数据库，不是文档/文件夹**：`drive file list` 会返回空、`file-content` 会报"文档内容抽取失败"；只能走 dbsheet schema/records。FlexPaper 工作表读不了正文/记录，Form 视图不承载记录。
+- **授权过期会自动恢复**：脚本检测到 token 过期/CLI 回退 app 身份时，会先刷新；刷新 token 也失效时运行 `auth login --device` 打开浏览器，成功后重试原命令。没有比 refresh token 更长的用户授权；`WPS365_AUTH=app` 可无人值守，但不能替代用户态文档权限。
 - **权限边界**：它用你本机 `wps365-cli` 的身份和权限操作云文档，能读写的就是那个账号能读写的东西；插件自己不保存、也不接触凭据。
 - **账号边界**：只支持 WPS 365 企业版账号；WPS 个人版账号请勿使用，接口不可用，插件无法工作。
 - **上下文开销**：技能正文保持精简，细节（17 条智能文档 + 15 条多维表硬约束、接口细节、并发实测语义）放在四份按需读取的参考文档里，只有真需要时才读。
@@ -214,8 +217,8 @@ cordis.patch.yml              # bundle patch：插入 skill-wps365-docs 行
 assets/wps365-docs/
 ├── SKILL.md                  # 常驻正文（约 5k 字符，控制在 8192 的修剪阈值内）
 ├── references/               # otl.md / office-files.md / dbsheet.md / concurrency.md，按需读取
-└── scripts/                  # otl_fetch.py otl_write.py file_fetch.py file_write.py xlsx_edit.py dbsheet.py
-                              # _wps_cli.py：六个脚本共用的 CLI 定位 + UTF-8 管道封装
+└── scripts/                  # otl_fetch.py otl_write.py file_fetch.py file_write.py xlsx_edit.py dbsheet.py auth.py
+                              # _wps_cli.py：七个脚本共用的 CLI 定位、UTF-8 管道与授权恢复
 locale/{en,zh}.json  icon.svg  test/   # test/scripts_test.py + test/dbsheet_test.py，npm test 会跑
 scripts/check-package.mjs     # 校验 npm 打包内容（CI 也会跑）
 scripts/clean-bytecode.mjs    # prepack：清掉跑脚本留下的 __pycache__
@@ -230,6 +233,7 @@ codex/                        # Codex 本地插件适配；构建与安装说明
 
 ## 更新记录
 
+- **0.2.1** — 新增授权过期自动恢复：脚本遇到 access token 过期、refresh token 失效或 CLI 回退 app 身份时，自动刷新或运行 `auth login --device` 打开浏览器，并重试原命令一次；`WPS365_NO_AUTO_LOGIN=1` 可关闭弹窗。远端已拒绝授权时，即使本地 token 未过期也会尝试刷新；显式应用身份（环境变量或命令行）不会误触发用户登录，命令行身份优先。文档说明 2 小时 access token / 365 天 refresh token 的实际生命周期，以及为什么正常情况下不需要每 2 小时登录。详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.2.0** — 新增**多维表（`.dbt`）**支持：`dbsheet.py` 提供 schema / 分页过滤读 / 单条读 / 创建 / 快照 / 部分更新 / 删除 / 附件下载，写入前按记录级快照比对、写后逐字段读回；Link 显示名自动映射成记录 ID，非法选项/日期先校验，附件按 `uploadId` 换取签名 URL 并按文件头纠正扩展名（实测 PNG 实为 JPEG）。同步补上 15 条多维表硬约束与 Form/FlexPaper 限制，Codex 适配、打包清单和 README 均已更新。详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.1.4** — 修正 `.xlsx` 写回读回校验：重复设置同一单元格时只校验最后一次赋值，布尔值、文本引号与空白按实际写入类型比较，清空单元格时正确接受稀疏空响应。详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.1.3** — 修掉一个**会静默骗人的写入失败**：`.xlsx` 的字节覆盖对「在线表格」不生效（版本号与字节都更新了，线上单元格却仍是旧值）。`xlsx_edit.py` 现在上传后会读回自己用 `--set` 写过的单元格，不一致就以退出码 1 明确失败并说明下一步；纯字节文件不受影响。文档同步补上这条硬约束（含实测数据）与 `versions` 接口必须带 `page_size` 等复测结论；Python 侧测试增到 34 例。详见 [CHANGELOG.md](CHANGELOG.md)。

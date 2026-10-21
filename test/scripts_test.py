@@ -137,6 +137,167 @@ class RunCliTest(unittest.TestCase):
             self.assertEqual(_wps_cli.run_cli(["cli"], 30, "file_fetch", "x"), "")
 
 
+class AuthRecoveryTest(unittest.TestCase):
+    """The 2-hour access token is refreshed by the CLI; when the 365-day refresh
+    token itself is gone, the scripts must open the device login once and retry."""
+
+    def setUp(self):
+        _wps_cli._AUTH_RECOVERY_ATTEMPTED = False
+        env = mock.patch.dict(os.environ, {"WPS365_AUTH": "delegated"})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def tearDown(self):
+        _wps_cli._AUTH_RECOVERY_ATTEMPTED = False
+
+    @staticmethod
+    def _status(state="expired", has_refresh=True):
+        return {
+            "delegated": {
+                "available": state != "not_found",
+                "status": state,
+                "remaining_seconds": 0 if state != "valid" else 7000,
+                "has_refresh": has_refresh,
+            }
+        }
+
+    def _run(self, replies, statuses, refresh=False, login=False, cmd=None):
+        calls = []
+
+        def fake_run(cmd, **options):
+            calls.append(cmd)
+            return replies.pop(0)
+
+        with mock.patch.object(_wps_cli.subprocess, "run", side_effect=fake_run), \
+                mock.patch.object(_wps_cli, "auth_status", side_effect=list(statuses)), \
+                mock.patch.object(_wps_cli, "_refresh_delegated", return_value=refresh) as refresh_mock, \
+                mock.patch.object(_wps_cli, "_login_delegated", return_value=login) as login_mock:
+            try:
+                return _wps_cli.run_cli(cmd or ["cli", "api", "get", "/x"], 30, "test", "GET /x"), calls, refresh_mock, login_mock
+            except SystemExit as exc:
+                return exc, calls, refresh_mock, login_mock
+
+    def test_auth_failure_refreshes_then_retries(self):
+        out, calls, refresh_mock, login_mock = self._run(
+            [mock.Mock(returncode=1, stdout="", stderr="userNotLogin"),
+             mock.Mock(returncode=0, stdout="ok", stderr="")],
+            [self._status("expired"), self._status("valid")], refresh=True)
+        self.assertEqual(out, "ok")
+        refresh_mock.assert_called_once()
+        login_mock.assert_not_called()
+        self.assertEqual(len(calls), 2)
+
+    def test_failed_refresh_falls_back_to_browser_login(self):
+        out, calls, refresh_mock, login_mock = self._run(
+            [mock.Mock(returncode=1, stdout="", stderr="access_token expired"),
+             mock.Mock(returncode=0, stdout="ok", stderr="")],
+            [self._status("expired"), self._status("valid")],
+            refresh=False, login=True)
+        self.assertEqual(out, "ok")
+        refresh_mock.assert_called_once()
+        login_mock.assert_called_once()
+        self.assertEqual(len(calls), 2)
+
+    def test_auth_failure_refreshes_even_when_local_token_is_valid(self):
+        out, calls, refresh_mock, login_mock = self._run(
+            [mock.Mock(returncode=1, stdout="", stderr="userNotLogin"),
+             mock.Mock(returncode=0, stdout="ok", stderr="")],
+            [self._status("valid"), self._status("valid")], refresh=True)
+        self.assertEqual(out, "ok")
+        refresh_mock.assert_called_once()
+        login_mock.assert_not_called()
+        self.assertEqual(len(calls), 2)
+
+    def test_revoked_refresh_token_logs_in_despite_valid_local_expiry(self):
+        out, calls, refresh_mock, login_mock = self._run(
+            [mock.Mock(returncode=1, stdout="", stderr="invalid_grant: refresh token revoked"),
+             mock.Mock(returncode=0, stdout="ok", stderr="")],
+            [self._status("valid"), self._status("valid")], login=True)
+        self.assertEqual(out, "ok")
+        refresh_mock.assert_called_once()
+        login_mock.assert_called_once()
+        self.assertEqual(len(calls), 2)
+
+    def test_app_environment_does_not_start_delegated_recovery(self):
+        with mock.patch.dict(os.environ, {"WPS365_AUTH": "app"}):
+            out, calls, refresh_mock, login_mock = self._run(
+                [mock.Mock(returncode=1, stdout="", stderr="required delegated scopes")],
+                [], cmd=["cli", "airpage", "export", "create", "123"])
+        self.assertIsInstance(out, SystemExit)
+        self.assertEqual(len(calls), 1)
+        refresh_mock.assert_not_called()
+        login_mock.assert_not_called()
+
+    def test_delegated_flag_overrides_app_environment_for_recovery(self):
+        with mock.patch.dict(os.environ, {"WPS365_AUTH": "app"}):
+            out, calls, refresh_mock, login_mock = self._run(
+                [mock.Mock(returncode=1, stdout="", stderr="userNotLogin"),
+                 mock.Mock(returncode=0, stdout="ok", stderr="")],
+                [self._status("expired"), self._status("valid")], refresh=True,
+                cmd=["cli", "api", "get", "/x", "--token-type", "delegated"])
+        self.assertEqual(out, "ok")
+        self.assertEqual(len(calls), 2)
+        refresh_mock.assert_called_once()
+        login_mock.assert_not_called()
+
+    def test_explicit_app_flags_do_not_start_delegated_recovery(self):
+        with mock.patch.dict(os.environ, {"WPS365_AUTH": "delegated"}):
+            for flag in (["--token-type", "app"], ["--token-type=app"]):
+                with self.subTest(flag=flag):
+                    out, calls, refresh_mock, login_mock = self._run(
+                        [mock.Mock(returncode=1, stdout="", stderr="required delegated scopes")],
+                        [], cmd=["cli", "api", "get", "/x", *flag])
+                    self.assertIsInstance(out, SystemExit)
+                    self.assertEqual(len(calls), 1)
+                    refresh_mock.assert_not_called()
+                    login_mock.assert_not_called()
+
+    def test_equals_delegated_flag_overrides_app_environment(self):
+        with mock.patch.dict(os.environ, {"WPS365_AUTH": "app"}):
+            self.assertFalse(_wps_cli._uses_app_identity(
+                ["cli", "api", "get", "/x", "--token-type=delegated"]))
+
+    def test_permission_error_is_not_treated_as_expiry(self):
+        out, calls, refresh_mock, login_mock = self._run(
+            [mock.Mock(returncode=1, stdout="", stderr="boom")], [], refresh=False, login=False)
+        self.assertIsInstance(out, SystemExit)
+        self.assertIn("boom", str(out))
+        refresh_mock.assert_not_called()
+        login_mock.assert_not_called()
+
+    def test_app_fallback_403_counts_as_an_auth_symptom(self):
+        detail = '{"code":403000004,"message":"this API does not support app authorization, required delegated scopes: [kso.user_base.read]"}'
+        self.assertTrue(_wps_cli._looks_like_auth_error(detail))
+        self.assertFalse(_wps_cli._looks_like_auth_error("403000004 permission denied"))
+
+    def test_expired_refresh_token_wins_over_a_valid_access_token(self):
+        expired = self._status("valid", True)
+        expired["delegated"]["refresh_token_expires_at"] = "2020-01-01T00:00:00+08:00"
+        fresh = self._status("valid", True)
+        fresh["delegated"]["refresh_token_expires_at"] = "2099-01-01T00:00:00+08:00"
+        with mock.patch.object(_wps_cli, "auth_status", side_effect=[expired, fresh]), \
+                mock.patch.object(_wps_cli, "_refresh_delegated", return_value=False), \
+                mock.patch.object(_wps_cli, "_login_delegated", return_value=True) as login_mock:
+            self.assertTrue(_wps_cli.ensure_auth("cli"))
+        login_mock.assert_called_once()
+
+    def test_valid_token_needs_no_refresh_or_login(self):
+        with mock.patch.object(_wps_cli, "auth_status", return_value=self._status("valid", True)), \
+                mock.patch.object(_wps_cli, "_refresh_delegated") as refresh_mock, \
+                mock.patch.object(_wps_cli, "_login_delegated") as login_mock:
+            self.assertTrue(_wps_cli.ensure_auth("cli"))
+        refresh_mock.assert_not_called()
+        login_mock.assert_not_called()
+
+    def test_auto_login_can_be_disabled(self):
+        with mock.patch.dict(os.environ, {"WPS365_NO_AUTO_LOGIN": "1"}), \
+                mock.patch.object(_wps_cli, "auth_status", return_value=self._status("expired")), \
+                mock.patch.object(_wps_cli, "_refresh_delegated", return_value=False), \
+                mock.patch.object(_wps_cli, "_invoke") as invoke_mock:
+            self.assertFalse(_wps_cli.ensure_auth("cli"))
+        invoke_mock.assert_not_called()
+
+
 class StdoutEncodingTest(unittest.TestCase):
     """The scripts' own output must survive a cp936 console."""
 

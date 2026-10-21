@@ -38,6 +38,16 @@ When .xlsx parsing or editing is needed, check openpyxl with "{python}" -c 'impo
 
 If wps365-cli is missing, stop before cloud operations and explain that the user needs to install it and authenticate on their own device. Point to the official installer for their platform: [POSIX installer](https://open-docs.wpscdn.cn/cli/install.sh) or [Windows PowerShell installer](https://open-docs.wpscdn.cn/cli/install.ps1). Do not execute either installer or authentication flow. If no shell is available, explain that these local scripts require one and continue only with information already available in the conversation.
 
+## Authentication lifetime and recovery
+
+The access token is valid for **2 hours**, but wps365-cli refreshes it about 10 seconds before expiry and retries a 401 transparently. The delegated **refresh token is valid for 365 days** and rotates on every refresh, so a normal installation needs `auth login --device` about once a year, not every two hours. Re-login is needed when the refresh token expires or is revoked, the token store is lost, or the CLI falls back to app identity and the API reports `required delegated scopes`.
+
+The shipped scripts already recover on these errors: they run `auth refresh --delegated`, then `auth login --device` (wps365-cli opens the browser), and retry the original command once. Set `WPS365_NO_AUTO_LOGIN=1` to disable the automatic browser prompt. For direct `{cli} api` or `{cli} dbsheet` commands, run this first when an auth error appears:
+
+    "{python}" "{skillDir}/scripts/auth.py" ensure --cli "{cli}"
+
+Use `auth.py status` to inspect only, or add `--json` to see `has_refresh` and `refresh_token_expires_at`. Do not set `WPS365_ACCESS_TOKEN` for normal use: it bypasses storage and automatic refresh, so it really does expire after two hours. There is no user authorization longer than the refresh token; `WPS365_AUTH=app` (client credentials) works unattended but cannot replace user-context document permissions.
+
 ## Choose the document path
 
 | Cloud item | Read | Edit and write |

@@ -20,6 +20,7 @@ const SCRIPT_NAMES = [
   'otl_write.py',
   'xlsx_edit.py',
   'dbsheet.py',
+  'auth.py',
 ]
 const FORBIDDEN_PARTS = new Set(['node_modules', '__pycache__', '.git', '.venv', 'venv'])
 const FORBIDDEN_FILE = /^(?:\.env(?:\..*)?|\.npmrc|\.pypirc|credentials?(?:[._-].*)?|secrets?(?:[._-].*)?|.*\.(?:pem|key|p12|pfx|token))$/i

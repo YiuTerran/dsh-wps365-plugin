@@ -9,6 +9,14 @@ description: 读取或写入 WPS 365 云文档。智能文档（.otl / airpage�
 
 命令一律写成**单行**、路径含空格用双引号包住，**不要用 `&&` 或管道串联** —— 这样 macOS / Linux 的 bash 与 Windows 的 PowerShell / cmd 都能直接执行（那一节还会告诉你本机是哪个平台）。
 
+## 授权：2 小时 token 会自动续期
+
+- `wps365-cli` 的 access token 只有 2 小时，但 CLI 会在过期前 10 秒自动刷新，并在 401 时透明重试。用户 refresh token 有效 **365 天**，每次刷新会轮换；正常情况下 `auth login --device` **一年一次**即可，不是每 2 小时一次。
+- 只有 refresh token 过期/被撤销、keyring 中的 token 丢失，或 CLI 回退到 app 身份后报 `required delegated scopes`，才需要重新登录。
+- 本目录脚本的 `run_cli` 已内置恢复：遇到上述授权错误先运行 `auth refresh --delegated`，失败则自动运行 `auth login --device`（CLI 会打开浏览器）并重试一次。设置 `WPS365_NO_AUTO_LOGIN=1` 可禁用自动弹窗。
+- 直接调用 `{cli} api` / `{cli} dbsheet` 前，先执行一次 `{python} {skillDir}/scripts/auth.py ensure --cli "{cli}"`；只查看状态用 `status`，加 `--json` 可看到 refresh token 的过期时间。
+- 不要把 `WPS365_ACCESS_TOKEN` 写进环境变量：它会跳过 token 存储和自动刷新，2 小时后必然失效。也没有比 refresh token 更长的用户授权；`WPS365_AUTH=app` 的 client_credentials 适合无人值守，但不能替代用户态文档权限。
+
 本文件只放**必须立刻知道**的规则与命令骨架，细节按需读 `{skillDir}/references/`：
 
 | 需要什么 | 读哪个文件 |

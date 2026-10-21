@@ -3,6 +3,24 @@
 本文件记录面向使用者的变更；每个版本的细节也同步写在 `README.md` 的「更新记录」一节。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.1] - 2026-10-21
+
+### 新增
+
+- **授权过期自动恢复**：新增 `assets/wps365-docs/scripts/auth.py`（`status` / `ensure`）。`_wps_cli.run_cli` 遇到 access token 过期、refresh token 失效、CLI 回退 app 身份导致的 `required delegated scopes` 等错误时，先运行 `auth refresh --delegated`；刷新失败则运行 `auth login --device`（CLI 自动打开浏览器请求授权），成功后重试原命令一次。`WPS365_NO_AUTO_LOGIN=1` 可禁用自动弹窗；`WPS365_ACCESS_TOKEN` 注入模式会明确提示无法自动恢复。
+- **授权生命周期说明**：access token 有效期 2 小时，但 CLI 会在过期前 10 秒自动刷新、401 透明重试；delegated refresh token 有效期 365 天且每次刷新轮换，正常情况下设备码登录约一年一次。当前没有比 refresh token 更长的用户授权；`WPS365_AUTH=app` 的 client_credentials 适合无人值守但不能替代用户态文档权限。文档同时说明如何用 `auth status` / `auth refresh` / `auth.py` 排查“每 2 小时就要登录”。
+- 版本号升到 `0.2.1`；`check-package.mjs` 的必需路径从 25 条增到 26 条（新增 `auth.py`）。
+
+### 修复
+
+- 业务请求已被远端拒绝授权时，强制尝试刷新；即使本地 token 仍显示未过期，也不会直接拿原凭据重试。刷新失败继续走设备码登录，主动 `auth.py ensure` 检查仍保留有效授权的快速返回。
+- 显式应用身份同时识别 `WPS365_AUTH=app`、`--token-type app` 和 `--token-type=app`，避免无效地启动用户登录；命令行显式 `delegated` 优先于环境变量默认身份。
+
+### 验证
+
+- 用假 CLI 做端到端恢复验证：业务命令先返回 `access_token expired`，脚本识别后刷新失败、调用 `auth login --device`，再重试原命令成功；`WPS365_ACCESS_TOKEN` 注入和 `WPS365_NO_AUTO_LOGIN=1` 两条禁用路径也不会误弹浏览器。
+- `test/scripts_test.py` 增到 52 例，覆盖授权错误识别、刷新后重试、刷新失败转设备码登录、refresh token 过期、权限错误不误判、关闭自动登录，以及本地未过期但远端拒绝授权、应用身份环境变量和命令行覆盖等回归场景。
+
 ## [0.2.0] - 2026-10-19
 
 ### 新增
@@ -103,6 +121,7 @@
 
 - **该版本会让 Harness 无法启动**（原因见 0.1.1 的修复）。它从未发布到 npm；如果需要在配置里引用，请直接使用 0.1.1。
 
+[0.2.1]: https://github.com/YiuTerran/dsh-wps365-plugin/releases/tag/v0.2.1
 [0.2.0]: https://github.com/YiuTerran/dsh-wps365-plugin/releases/tag/v0.2.0
 [0.1.1]: https://github.com/YiuTerran/dsh-wps365-plugin/releases/tag/v0.1.1
 [0.1.2]: https://github.com/YiuTerran/dsh-wps365-plugin/releases/tag/v0.1.2

@@ -38,14 +38,14 @@ Package name triggered spam detection
 # 1. 确认干净且测试通过（含打包内容检查）
 npm test && npm run check:pack
 
-# 2. 设置目标版本（以下以 0.2.0 为例，已是目标版本则跳过命令），同步更新 CHANGELOG.md 与两个 README 的「更新记录」。Codex 插件的两份 manifest 也应使用根目录 `package.json` 的版本；构建会检查一致性。
-npm version 0.2.0 --no-git-tag-version
+# 2. 设置目标版本（以下以 0.2.1 为例，已是目标版本则跳过命令），同步更新 CHANGELOG.md 与两个 README 的「更新记录」。Codex 插件的两份 manifest 也应使用根目录 `package.json` 的版本；构建会检查一致性。
+npm version 0.2.1 --no-git-tag-version
 
 # 3. 提交并推送
-git add -A && git commit -m "release: v0.2.0" && git push
+git add -A && git commit -m "release: v0.2.1" && git push
 
 # 4. 打 tag 并推送 —— 这一步会触发 release.yml 自动发布
-git tag -a v0.2.0 -m "Release v0.2.0" && git push origin v0.2.0
+git tag -a v0.2.1 -m "Release v0.2.1" && git push origin v0.2.1
 ```
 
 `release.yml` 会先跑测试、校验 **tag 与 `package.json` 的版本一致**，再用 `npm publish --provenance` 发布。配置好 Trusted Publisher 后，本地不需要 `npm login`。
@@ -62,7 +62,7 @@ npm publish              # scoped 包公开可装靠 publishConfig.access: "publ
 
 - **绝对不要发布 0.1.0。** 它会让 Harness 无法启动（见 CHANGELOG）。真正的起点是 0.1.1。npm 不允许覆盖已发布的版本号，一旦误发只能 `npm deprecate @tryao/dsh-wps365-plugin@0.1.0 "breaks DeepSeek Harness startup; use 0.1.1+"` 补救。
 - **不要给这个包加 `peerDependencies`。** DSH 的插件兼容性检查读的就是 peer 范围（第三方插件曾因 peer 不匹配被拒绝安装），而本包零依赖、只用相对导入与 `node:` 内置模块，声明 peer 只会缩小可安装范围。改成在 README 里写明实测的 DSH 版本。
-- **发布前跑 `npm run check:pack`**：它断言 tarball 含全部 25 个必需路径，且不含字节码/日志/tgz 等仓库专属文件。`files` 字段是白名单，漏一个目录会让装好的 bundle 缺文件。CI 每次也跑这一步。
+- **发布前跑 `npm run check:pack`**：它断言 tarball 含全部 26 个必需路径，且不含字节码/日志/tgz 等仓库专属文件。`files` 字段是白名单，漏一个目录会让装好的 bundle 缺文件。CI 每次也跑这一步。
 - **`publishConfig.access` 必须保持 `"public"`**，否则 scoped 包默认是私有的，别人装不了。
 - 发布后可以验证真实安装效果（会改到你的 profile，注意先备份 `cordis.patch.yml`）：
 

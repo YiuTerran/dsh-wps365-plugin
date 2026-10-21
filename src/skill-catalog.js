@@ -31,6 +31,7 @@ export const SKILL_SCRIPTS = [
   'file_write.py',
   'xlsx_edit.py',
   'dbsheet.py',
+  'auth.py',
 ]
 
 /**

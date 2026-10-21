@@ -1,12 +1,12 @@
 # Codex WPS 365 文档插件
 
-这是给 Codex 本地执行环境使用的 WPS 365 文档插件。内容基于仓库里的 DSH 插件 0.2.0，复用其 wps365-docs 工作流与参考资料；Codex 版本是独立的 skills-only 插件，不加载 DSH 的 JS 运行时注入。
+这是给 Codex 本地执行环境使用的 WPS 365 文档插件。内容基于仓库里的 DSH 插件 0.2.1，复用其 wps365-docs 工作流与参考资料；Codex 版本是独立的 skills-only 插件，不加载 DSH 的 JS 运行时注入。
 
 ## 运行条件
 
-插件需要本地执行器，以便调用 Python 脚本和用户自己安装的 wps365-cli。它不携带 WPS 凭据，也不负责安装、登录或验证用户的 WPS 账号。Python 依赖按任务选择：读写 .xlsx 需要 openpyxl，使用 python-docx 创建或处理 DOCX 时需要 python-docx；可用时优先使用 Codex 提供的工作区 Python 运行时。
+插件需要本地执行器，以便调用 Python 脚本和用户自己安装的 wps365-cli。它不携带 WPS 凭据，也不负责安装 CLI 或验证用户的 WPS 账号。授权过期时脚本会自动刷新 delegated token；refresh token 也失效时运行 `auth login --device`（打开浏览器）并重试一次，设置 `WPS365_NO_AUTO_LOGIN=1` 可关闭自动登录。Python 依赖按任务选择：读写 .xlsx 需要 openpyxl，使用 python-docx 创建或处理 DOCX 时需要 python-docx；可用时优先使用 Codex 提供的工作区 Python 运行时。
 
-技能通过当前 Codex 技能目录解析资源路径，使用随插件打包的 _wps_cli.resolve() 定位 CLI，并用 tempfile 创建临时目录。CLI 缺失时技能只说明官方安装入口和本机授权要求，不会自动安装或登录。任何真实云端写入都要求先留存备份及快照/哈希版本基线；冲突必须停下交由用户处理。
+技能通过当前 Codex 技能目录解析资源路径，使用随插件打包的 _wps_cli.resolve() 定位 CLI，并用 tempfile 创建临时目录。CLI 缺失时技能只说明官方安装入口和本机授权要求，不会自动安装；CLI 存在但 delegated token 过期时，脚本会刷新或启动设备码授权（`auth.py ensure` 也可手动调用）。access token 只有 2 小时，但 refresh token 有效 365 天并轮换，正常情况下无需每 2 小时登录。任何真实云端写入都要求先留存备份及快照/哈希版本基线；冲突必须停下交由用户处理。
 
 Office 文件编辑依赖已安装的 documents、spreadsheets 或 presentations 能力。xlsx_edit.py 是可选兼容脚本；Codex 技能不假设存在 DSH LibreOffice Kit 或 Node 运行时。写入前后需要区分本地命令结果、云端版本元数据和实际读回结果。构建与静态内容检查不能证明用户设备的 CLI 授权、Office 格式保真或云端读写成功。
 
@@ -20,7 +20,7 @@ Office 文件编辑依赖已安装的 documents、spreadsheets 或 presentations
 构建输出：
 
 - codex/dist/wps365-docs/：可检查的插件目录，包含 manifests、技能内容、参考资料、随包图标和从原始 assets/wps365-docs/scripts 复制的 Python 脚本。
-- codex/dist/wps365-docs-<版本>.tar.gz：同一插件的归档包（文件名跟随当前版本，例如 `wps365-docs-0.2.0.tar.gz`）。
+- codex/dist/wps365-docs-<版本>.tar.gz：同一插件的归档包（文件名跟随当前版本，例如 `wps365-docs-0.2.1.tar.gz`）。
 
 Codex 两份 manifest 的版本号跟随仓库根目录 `package.json`；后续发版时同步更新两份 manifest，构建会在版本不一致时失败。
 

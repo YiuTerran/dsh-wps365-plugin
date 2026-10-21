@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "wps365-docs",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Read and edit WPS 365 smart documents, Office files, and multi-dimensional tables (.dbt) through the user's local wps365-cli, with explicit conflict checks before cloud writes.",
   "author": {
     "name": "tryao"

@@ -40,6 +40,7 @@ const REQUIRED = [
   'assets/wps365-docs/scripts/file_write.py',
   'assets/wps365-docs/scripts/xlsx_edit.py',
   'assets/wps365-docs/scripts/dbsheet.py',
+  'assets/wps365-docs/scripts/auth.py',
   'locale/en.json',
   'locale/zh.json',
 ]
