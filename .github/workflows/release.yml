@@ -1,8 +1,10 @@
 name: Release
 
-# Publishes @tryao/dsh-wps365-plugin to npm when a v* tag is pushed.
+# Publishes @tryao/dsh-wps365-plugin to npm and creates a GitHub Release when a
+# v* tag is pushed. The GitHub Release body is taken from the matching section
+# in CHANGELOG.md.
 #
-# Uses npm Trusted Publishing (OIDC), so no NPM_TOKEN secret is stored in the
+# npm uses Trusted Publishing (OIDC), so no NPM_TOKEN secret is stored in the
 # repository. Configure the trusted publisher once on npmjs.com:
 #   package → Settings → Trusted Publisher → GitHub Actions
 #   organization/user: YiuTerran
@@ -18,7 +20,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # create the GitHub Release
   id-token: write # required for Trusted Publishing / provenance
 
 jobs:
@@ -71,3 +73,63 @@ jobs:
       - name: Publish to npm
         if: steps.registry.outputs.exists == 'false'
         run: npm publish --provenance
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    # The tagged commit is the source of truth for the body; a pre-built asset
+    # isn't attached (existing releases carry none), so a full checkout suffices.
+    steps:
+      - uses: actions/checkout@v4
+
+      # Extract the changelog section for this version as the release body, so
+      # the GitHub Release stays in sync with CHANGELOG.md instead of being
+      # hand-written per tag.
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          # Match the "## [<version>] " header with literal string matching
+          # (index()==1) so brackets/dots in the version need no regex escaping.
+          body="$(awk -v pat="## [$version] " '
+            index($0, pat) == 1 { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md)"
+          if [ -z "$body" ]; then
+            echo "::warning::No CHANGELOG.md section for $GITHUB_REF_NAME; creating an empty-body release."
+          fi
+          {
+            echo 'body<<GH_OUT'
+            printf '%s' "$body"
+            echo ''
+            echo 'GH_OUT'
+          } >> "$GITHUB_OUTPUT"
+
+      # Keep it idempotent like the npm step: re-tagging an already-released
+      # version must not fail the run.
+      - name: Check whether release already exists
+        id: release_exists
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "$GITHUB_REF_NAME already has a GitHub Release — skipping."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        if: steps.release_exists.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Release $GITHUB_REF_NAME" \
+            --notes "$(cat <<'EOF'
+${{ steps.changelog.outputs.body }}
+EOF
+)"

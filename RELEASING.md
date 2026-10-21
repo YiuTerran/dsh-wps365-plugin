@@ -48,7 +48,7 @@ git add -A && git commit -m "release: v0.2.2" && git push
 git tag -a v0.2.2 -m "Release v0.2.2" && git push origin v0.2.2
 ```
 
-`release.yml` 会先跑测试、校验 **tag 与 `package.json` 的版本一致**，再用 `npm publish --provenance` 发布。配置好 Trusted Publisher 后，本地不需要 `npm login`。
+`release.yml` 会先跑测试、校验 **tag 与 `package.json` 的版本一致**，再用 `npm publish --provenance` 发布，然后自动创建一个 **GitHub Release**（标题为 `Release vX.Y.Z`，正文取自 `CHANGELOG.md` 中本版本的章节）。配置好 Trusted Publisher 后，本地不需要 `npm login`。
 
 ## 本地兜底（CI 不可用，或首次创建包）
 
