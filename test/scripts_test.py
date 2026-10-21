@@ -281,6 +281,20 @@ class AuthRecoveryTest(unittest.TestCase):
             self.assertTrue(_wps_cli.ensure_auth("cli"))
         login_mock.assert_called_once()
 
+    def test_unknown_refresh_expiry_is_not_an_expiry(self):
+        for value in ("0001-01-01T00:00:00Z", "", "not-a-date"):
+            with self.subTest(value=value):
+                status = self._status("valid", True)
+                status["delegated"]["refresh_token_expires_at"] = value
+                self.assertFalse(_wps_cli._refresh_expired(status))
+                self.assertIn("未知", _wps_cli.refresh_expiry_label(status))
+                with mock.patch.object(_wps_cli, "auth_status", return_value=status), \
+                        mock.patch.object(_wps_cli, "_refresh_delegated") as refresh_mock, \
+                        mock.patch.object(_wps_cli, "_login_delegated") as login_mock:
+                    self.assertTrue(_wps_cli.ensure_auth("cli"))
+                refresh_mock.assert_not_called()
+                login_mock.assert_not_called()
+
     def test_valid_token_needs_no_refresh_or_login(self):
         with mock.patch.object(_wps_cli, "auth_status", return_value=self._status("valid", True)), \
                 mock.patch.object(_wps_cli, "_refresh_delegated") as refresh_mock, \

@@ -29,6 +29,7 @@ from _wps_cli import (
     AUTH_TIMEOUT,
     auth_status,
     ensure_auth,
+    refresh_expiry_label,
     resolve,
     use_utf8_stdio,
 )
@@ -47,7 +48,7 @@ def _summary(status: dict) -> str:
         status=delegated.get("status"),
         remaining=delegated.get("remaining_seconds"),
         refresh=delegated.get("has_refresh"),
-        expires=delegated.get("refresh_token_expires_at"),
+        expires=refresh_expiry_label(status),
     )
 
 
@@ -61,7 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"auth status/refresh 超时秒数（默认 {AUTH_TIMEOUT}）")
     parser.add_argument("--login-timeout", type=int, default=AUTH_LOGIN_TIMEOUT,
                         help=f"设备码登录等待秒数（默认 {AUTH_LOGIN_TIMEOUT}）")
-    parser.add_argument("--json", action="store_true", help="输出完整 auth status JSON")
+    parser.add_argument("--json", action="store_true",
+                        help="输出完整 auth status JSON（原始字段；0001-01-01 表示未提供，不是过期）")
     return parser
 
 

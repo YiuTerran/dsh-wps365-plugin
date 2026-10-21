@@ -40,7 +40,7 @@ If wps365-cli is missing, stop before cloud operations and explain that the user
 
 ## Authentication lifetime and recovery
 
-The access token is valid for **2 hours**, but wps365-cli refreshes it about 10 seconds before expiry and retries a 401 transparently. The delegated **refresh token is valid for 365 days** and rotates on every refresh, so a normal installation needs `auth login --device` about once a year, not every two hours. Re-login is needed when the refresh token expires or is revoked, the token store is lost, or the CLI falls back to app identity and the API reports `required delegated scopes`.
+The access token is valid for **2 hours**, but wps365-cli refreshes it about 10 seconds before expiry and retries a 401 transparently. The delegated **refresh token is valid for 365 days** and rotates on every refresh, so a normal installation needs `auth login --device` about once a year, not every two hours. Re-login is needed when the refresh token expires or is revoked, the token store is lost, or the CLI falls back to app identity and the API reports `required delegated scopes`. A fresh device login may report `refresh_token_expires_at` as `0001-01-01` (Go's zero time, meaning the response carried no expiry); that is **unknown, not expired**. `auth.py status` labels it as unknown and does not trigger a refresh or login.
 
 The shipped scripts already recover on these errors: they run `auth refresh --delegated`, then `auth login --device` (wps365-cli opens the browser), and retry the original command once. Set `WPS365_NO_AUTO_LOGIN=1` to disable the automatic browser prompt. For direct `{cli} api` or `{cli} dbsheet` commands, run this first when an auth error appears:
 

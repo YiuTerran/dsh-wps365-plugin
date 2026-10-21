@@ -223,17 +223,46 @@ def _delegated_usable(status: dict | None) -> bool:
     return bool(delegated.get("available")) and delegated.get("status") == "valid"
 
 
-def _refresh_expired(status: dict | None) -> bool:
-    """Whether the stored refresh token is past expiry (or within 5 minutes)."""
+def refresh_expiry(status: dict | None) -> datetime.datetime | None:
+    """The parsed refresh-token expiry, or ``None`` when it is unknown.
+
+    A fresh device login commonly returns ``refresh_token_expires_at`` as
+    ``0001-01-01T00:00:00Z``: that is Go's zero time, meaning the response did
+    not carry an expiry, **not** that the refresh token has expired. The same
+    applies to a missing or unparseable value. Callers must not treat this as a
+    reason to log in; the refresh token may still work and rotate normally.
+    """
     value = _delegated(status).get("refresh_token_expires_at")
-    if not value or str(value).startswith("0001-"):
-        return False
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text or text.startswith("0001-"):
+        return None
     try:
-        expires = datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        expires = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
-        return False
+        return None
     if expires.tzinfo is None:
         expires = expires.replace(tzinfo=datetime.timezone.utc)
+    return expires
+
+
+def refresh_expiry_label(status: dict | None) -> str:
+    """Human-readable refresh expiry; never presents Go's zero time as a date."""
+    expires = refresh_expiry(status)
+    if expires is None:
+        return "未知（登录响应未提供有效期，不代表已过期）"
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if expires <= now:
+        return f"已过期（{expires.isoformat()}）"
+    return expires.isoformat()
+
+
+def _refresh_expired(status: dict | None) -> bool:
+    """Whether the stored refresh token is past expiry (or within 5 minutes)."""
+    expires = refresh_expiry(status)
+    if expires is None:
+        return False
     return expires <= datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)
 
 

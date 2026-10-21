@@ -1,6 +1,6 @@
 # Codex WPS 365 文档插件
 
-这是给 Codex 本地执行环境使用的 WPS 365 文档插件。内容基于仓库里的 DSH 插件 0.2.1，复用其 wps365-docs 工作流与参考资料；Codex 版本是独立的 skills-only 插件，不加载 DSH 的 JS 运行时注入。
+这是给 Codex 本地执行环境使用的 WPS 365 文档插件。内容基于仓库里的 DSH 插件 0.2.2，复用其 wps365-docs 工作流与参考资料；Codex 版本是独立的 skills-only 插件，不加载 DSH 的 JS 运行时注入。
 
 ## 运行条件
 
@@ -20,7 +20,7 @@ Office 文件编辑依赖已安装的 documents、spreadsheets 或 presentations
 构建输出：
 
 - codex/dist/wps365-docs/：可检查的插件目录，包含 manifests、技能内容、参考资料、随包图标和从原始 assets/wps365-docs/scripts 复制的 Python 脚本。
-- codex/dist/wps365-docs-<版本>.tar.gz：同一插件的归档包（文件名跟随当前版本，例如 `wps365-docs-0.2.1.tar.gz`）。
+- codex/dist/wps365-docs-<版本>.tar.gz：同一插件的归档包（文件名跟随当前版本，例如 `wps365-docs-0.2.2.tar.gz`）。
 
 Codex 两份 manifest 的版本号跟随仓库根目录 `package.json`；后续发版时同步更新两份 manifest，构建会在版本不一致时失败。
 

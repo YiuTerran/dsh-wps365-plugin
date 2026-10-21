@@ -38,14 +38,14 @@ Package name triggered spam detection
 # 1. 确认干净且测试通过（含打包内容检查）
 npm test && npm run check:pack
 
-# 2. 设置目标版本（以下以 0.2.1 为例，已是目标版本则跳过命令），同步更新 CHANGELOG.md 与两个 README 的「更新记录」。Codex 插件的两份 manifest 也应使用根目录 `package.json` 的版本；构建会检查一致性。
-npm version 0.2.1 --no-git-tag-version
+# 2. 设置目标版本（以下以 0.2.2 为例，已是目标版本则跳过命令），同步更新 CHANGELOG.md 与两个 README 的「更新记录」。Codex 插件的两份 manifest 也应使用根目录 `package.json` 的版本；构建会检查一致性。
+npm version 0.2.2 --no-git-tag-version
 
 # 3. 提交并推送
-git add -A && git commit -m "release: v0.2.1" && git push
+git add -A && git commit -m "release: v0.2.2" && git push
 
 # 4. 打 tag 并推送 —— 这一步会触发 release.yml 自动发布
-git tag -a v0.2.1 -m "Release v0.2.1" && git push origin v0.2.1
+git tag -a v0.2.2 -m "Release v0.2.2" && git push origin v0.2.2
 ```
 
 `release.yml` 会先跑测试、校验 **tag 与 `package.json` 的版本一致**，再用 `npm publish --provenance` 发布。配置好 Trusted Publisher 后，本地不需要 `npm login`。

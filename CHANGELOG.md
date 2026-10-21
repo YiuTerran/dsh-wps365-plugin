@@ -3,6 +3,17 @@
 本文件记录面向使用者的变更；每个版本的细节也同步写在 `README.md` 的「更新记录」一节。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.2] - 2026-10-21
+
+### 修复
+
+- **把 `0001-01-01` 当作“未知”而不是“已过期”。** 刚完成 `auth login --device` 时，CLI 可能把 `refresh_token_expires_at` 返回为 Go 零值 `0001-01-01T00:00:00Z`（表示响应没有带有效期），但 refresh token 实际可用并会在 refresh 后显示一年后的日期。新增 `refresh_expiry()` / `refresh_expiry_label()`：缺失、零值和无法解析的值都视为未知，`_refresh_expired()` 返回 false，`ensure_auth()` 不会因此主动刷新或弹浏览器；`auth.py status` 把零值显示为“未知（登录响应未提供有效期，不代表已过期）”，不再显示 `0001-01-01`。
+
+### 验证
+
+- 用返回 `refresh_token_expires_at: "0001-01-01T00:00:00Z"` 的假 CLI 验证：`auth.py status` 显示“未知”，`auth.py ensure` 返回 0，且没有调用 refresh/login。
+- `test/scripts_test.py` 增到 53 例，新增未知/空/畸形 refresh 过期时间不触发恢复的回归用例。
+
 ## [0.2.1] - 2026-10-21
 
 ### 新增
@@ -121,6 +132,7 @@
 
 - **该版本会让 Harness 无法启动**（原因见 0.1.1 的修复）。它从未发布到 npm；如果需要在配置里引用，请直接使用 0.1.1。
 
+[0.2.2]: https://github.com/YiuTerran/dsh-wps365-plugin/releases/tag/v0.2.2
 [0.2.1]: https://github.com/YiuTerran/dsh-wps365-plugin/releases/tag/v0.2.1
 [0.2.0]: https://github.com/YiuTerran/dsh-wps365-plugin/releases/tag/v0.2.0
 [0.1.1]: https://github.com/YiuTerran/dsh-wps365-plugin/releases/tag/v0.1.1
