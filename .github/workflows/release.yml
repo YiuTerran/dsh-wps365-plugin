@@ -111,6 +111,8 @@ jobs:
       # version must not fail the run.
       - name: Check whether release already exists
         id: release_exists
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -124,12 +126,11 @@ jobs:
         if: steps.release_exists.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_BODY: ${{ steps.changelog.outputs.body }}
         run: |
           set -euo pipefail
+          printf '%s\n' "$RELEASE_BODY" > release-notes.md
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --title "Release $GITHUB_REF_NAME" \
-            --notes "$(cat <<'EOF'
-${{ steps.changelog.outputs.body }}
-EOF
-)"
+            --notes-file release-notes.md

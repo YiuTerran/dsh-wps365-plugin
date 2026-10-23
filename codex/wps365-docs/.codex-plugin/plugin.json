@@ -1,6 +1,6 @@
 {
   "name": "wps365-docs",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "通过本机 wps365-cli 读取和编辑 WPS 365 智能文档、Office 文件及多维表（.dbt），并在云端写入前检查冲突。",
   "author": {
     "name": "tryao"

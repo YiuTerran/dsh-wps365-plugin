@@ -37,6 +37,7 @@ SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, SCRIPTS)
 
 import _wps_cli  # noqa: E402
+import auth as wps_auth  # noqa: E402
 import file_fetch  # noqa: E402
 import otl_fetch  # noqa: E402
 import otl_write  # noqa: E402
@@ -270,6 +271,20 @@ class AuthRecoveryTest(unittest.TestCase):
         self.assertTrue(_wps_cli._looks_like_auth_error(detail))
         self.assertFalse(_wps_cli._looks_like_auth_error("403000004 permission denied"))
 
+    def test_app_fallback_invalid_scope_refreshes_with_login_disabled(self):
+        detail = ("delegated token unavailable, using app identity\n"
+                  "api request failed with status 403: invalid_scope "
+                  "kso.file_link.readwrite has not been granted")
+        with mock.patch.dict(os.environ, {"WPS365_NO_AUTO_LOGIN": "1"}):
+            out, calls, refresh_mock, login_mock = self._run(
+                [mock.Mock(returncode=1, stdout="", stderr=detail),
+                 mock.Mock(returncode=0, stdout='{"file_id":"example"}', stderr="")],
+                [self._status("expired"), self._status("valid")], refresh=True)
+        self.assertEqual(out, '{"file_id":"example"}')
+        self.assertEqual(len(calls), 2)
+        refresh_mock.assert_called_once()
+        login_mock.assert_not_called()
+
     def test_expired_refresh_token_wins_over_a_valid_access_token(self):
         expired = self._status("valid", True)
         expired["delegated"]["refresh_token_expires_at"] = "2020-01-01T00:00:00+08:00"
@@ -310,6 +325,67 @@ class AuthRecoveryTest(unittest.TestCase):
                 mock.patch.object(_wps_cli, "_invoke") as invoke_mock:
             self.assertFalse(_wps_cli.ensure_auth("cli"))
         invoke_mock.assert_not_called()
+
+
+class AuthCommandTest(unittest.TestCase):
+    def test_status_only_inspects_even_when_token_is_expired(self):
+        with mock.patch.object(sys, "argv", ["auth.py", "status", "--cli", "cli"]), \
+                mock.patch.object(wps_auth, "auth_status",
+                                  return_value=AuthRecoveryTest._status()), \
+                mock.patch.object(wps_auth, "ensure_auth") as ensure, \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            wps_auth.main()
+        ensure.assert_not_called()
+        self.assertIn("expired", output.getvalue())
+
+    def test_status_rejects_force_refresh_without_touching_credentials(self):
+        with mock.patch.object(sys, "argv", ["auth.py", "status", "--force-refresh"]), \
+                mock.patch.object(wps_auth, "auth_status") as status, \
+                mock.patch.object(wps_auth, "ensure_auth") as ensure, \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as caught:
+                wps_auth.main()
+        self.assertEqual(caught.exception.code, 2)
+        status.assert_not_called()
+        ensure.assert_not_called()
+
+    def test_force_refresh_bypasses_locally_valid_token(self):
+        valid = AuthRecoveryTest._status("valid")
+        with mock.patch.dict(os.environ, {"WPS365_NO_AUTO_LOGIN": "1"}), \
+                mock.patch.object(sys, "argv",
+                                  ["auth.py", "ensure", "--force-refresh", "--cli", "cli"]), \
+                mock.patch.object(_wps_cli, "auth_status", return_value=valid), \
+                mock.patch.object(wps_auth, "auth_status", return_value=valid), \
+                mock.patch.object(_wps_cli, "_refresh_delegated",
+                                  return_value=True) as refresh, \
+                mock.patch.object(_wps_cli, "_login_delegated") as login, \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            wps_auth.main()
+        refresh.assert_called_once()
+        login.assert_not_called()
+        self.assertIn("valid", output.getvalue())
+
+    def test_ensure_keeps_fast_path_for_valid_credentials(self):
+        valid = AuthRecoveryTest._status("valid")
+        with mock.patch.object(sys, "argv", ["auth.py", "ensure", "--cli", "cli"]), \
+                mock.patch.object(_wps_cli, "auth_status", return_value=valid), \
+                mock.patch.object(wps_auth, "auth_status", return_value=valid), \
+                mock.patch.object(_wps_cli, "_refresh_delegated") as refresh, \
+                mock.patch.object(_wps_cli, "_login_delegated") as login, \
+                contextlib.redirect_stdout(io.StringIO()):
+            wps_auth.main()
+        refresh.assert_not_called()
+        login.assert_not_called()
+
+    def test_failed_recovery_exits_without_reporting_success(self):
+        with mock.patch.object(sys, "argv", ["auth.py", "ensure", "--cli", "cli"]), \
+                mock.patch.object(wps_auth, "ensure_auth", return_value=False), \
+                mock.patch.object(wps_auth, "auth_status") as status, \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(SystemExit):
+                wps_auth.main()
+        status.assert_not_called()
+        self.assertEqual(output.getvalue(), "")
 
 
 class StdoutEncodingTest(unittest.TestCase):

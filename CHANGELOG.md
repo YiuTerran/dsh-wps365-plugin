@@ -3,6 +3,20 @@
 本文件记录面向使用者的变更；每个版本的细节也同步写在 `README.md` 的「更新记录」一节。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.3] - 2026-10-23
+
+### 修复
+
+- **直接调用 CLI 前必须检查并恢复用户授权。** Codex 与 DSH 指引统一要求先执行 `auth.py ensure`，共享链接元数据示例同步补上前置步骤。明确直接 CLI 调用不会经过脚本的自动恢复封装，`status` 只检查、不刷新，`has_refresh: true` 不代表刷新成功。
+- **明确 app 回退后的处理顺序。** 遇到用户 token 失效或 `delegated token unavailable, using app identity` 后，即使随后返回 `403 invalid_scope`，也先恢复 delegated 身份、成功后重试原请求一次，再判断实际权限。明确凭据沙盒权限的处理，以及恢复尚未尝试时不能转向浏览器或断言用户没有权限。
+- `auth.py ensure` 新增 `--force-refresh`，用于远端拒绝授权但本地 token 仍显示有效的场景；`status --force-refresh` 会报参数错误，不修改凭据。
+- 澄清资源发现阶段不登录与认证恢复阶段允许设备码登录的边界；禁止 agent 自行设置禁用自动登录的环境变量。用户已有的 `WPS365_NO_AUTO_LOGIN=1` / `WPS365_AUTO_LOGIN=0` 仍只禁用登录弹窗，不阻止 refresh。
+- 修复 GitHub Release 工作流的多行正文 YAML 缩进错误，使用环境变量和正文文件传递 release notes，并为已有 Release 检查配置认证。
+
+### 验证
+
+- 新增本地模拟回归：app 回退后 `403 invalid_scope` 在禁用登录时仍刷新并重试；命令入口强制刷新、本地有效凭据快速返回、只读状态、非法参数与恢复失败退出。测试不使用真实 WPS 凭据，不证明云端授权恢复成功。
+
 ## [0.2.2] - 2026-10-21
 
 ### 修复

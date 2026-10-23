@@ -11,11 +11,14 @@ Usage:
 
     python3 auth.py status --cli ~/.local/bin/wps365-cli
     python3 auth.py ensure --cli ~/.local/bin/wps365-cli
+    python3 auth.py ensure --force-refresh --cli ~/.local/bin/wps365-cli
     python3 auth.py ensure --json
 
 ``ensure`` is safe to run before a cloud operation: it exits 0 quickly when the
 delegated token is valid, and only refreshes/re-authenticates when needed.
-Set ``WPS365_NO_AUTO_LOGIN=1`` to forbid the browser prompt.
+After a remote auth rejection, use ``--force-refresh`` to bypass local validity.
+``status`` only inspects credentials; it never refreshes them.
+Set ``WPS365_NO_AUTO_LOGIN=1`` to forbid the browser prompt, not token refresh.
 """
 
 from __future__ import annotations
@@ -64,12 +67,17 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"设备码登录等待秒数（默认 {AUTH_LOGIN_TIMEOUT}）")
     parser.add_argument("--json", action="store_true",
                         help="输出完整 auth status JSON（原始字段；0001-01-01 表示未提供，不是过期）")
+    parser.add_argument("--force-refresh", action="store_true",
+                        help="ensure 时强制尝试刷新，用于远端已拒绝但本地仍显示有效的 token")
     return parser
 
 
 def main() -> None:
     use_utf8_stdio()
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
+    if args.action == "status" and args.force_refresh:
+        parser.error("--force-refresh 仅适用于 ensure；status 只检查，不刷新")
     if args.action == "status":
         status = auth_status(args.cli, args.timeout)
         if status is None:
@@ -78,7 +86,8 @@ def main() -> None:
               if args.json else _summary(status))
         return
 
-    if not ensure_auth(args.cli, _LABEL, args.timeout, args.login_timeout):
+    if not ensure_auth(args.cli, _LABEL, args.timeout, args.login_timeout,
+                       force_refresh=args.force_refresh):
         sys.exit(f"[{_LABEL}] 自动授权未完成；请手动运行：{args.cli} auth login --device")
     status = auth_status(args.cli, args.timeout)
     if status is None:

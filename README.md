@@ -132,7 +132,7 @@ npm --prefix codex run build
 npm --prefix codex test
 ```
 
-构建需要 Node.js 22 或更高版本；生成 `.tar.gz` 归档还需要系统提供 `tar` 命令。无需运行 `npm install`，构建和检查使用 Node.js 内置模块。构建会生成完整插件目录 `codex/dist/wps365-docs/` 和归档 `codex/dist/wps365-docs-0.2.2.tar.gz`。请把**构建生成的目录**注册并安装；`codex/wps365-docs/` 是源码，不含构建复制进去的共享 Python 脚本，不能直接作为完整插件安装。
+构建需要 Node.js 22 或更高版本；生成 `.tar.gz` 归档还需要系统提供 `tar` 命令。无需运行 `npm install`，构建和检查使用 Node.js 内置模块。构建会生成完整插件目录 `codex/dist/wps365-docs/` 和归档 `codex/dist/wps365-docs-0.2.3.tar.gz`。请把**构建生成的目录**注册并安装；`codex/wps365-docs/` 是源码，不含构建复制进去的共享 Python 脚本，不能直接作为完整插件安装。
 
 在 Codex 中可以这样请求安装：
 
@@ -233,6 +233,7 @@ codex/                        # Codex 本地插件适配；构建与安装说明
 
 ## 更新记录
 
+- **0.2.3** — 强制直接 CLI 调用前执行 `auth.py ensure`，补全共享链接示例；明确 app 回退后先恢复用户身份再重试、`status` 不刷新、禁用自动登录仍允许 refresh。新增 `ensure --force-refresh` 处理远端拒绝但本地仍有效的 token，并修复 GitHub Release 工作流。详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.2.2** — 修复刚完成设备码登录时 `refresh_token_expires_at` 显示为 `0001-01-01` 被误读为过期的问题：缺失/零值/畸形值统一视为“未知”，`auth.py status` 显示为未知，恢复逻辑不会因此刷新或重登。详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.2.1** — 新增授权过期自动恢复：脚本遇到 access token 过期、refresh token 失效或 CLI 回退 app 身份时，自动刷新或运行 `auth login --device` 打开浏览器，并重试原命令一次；`WPS365_NO_AUTO_LOGIN=1` 可关闭弹窗。远端已拒绝授权时，即使本地 token 未过期也会尝试刷新；显式应用身份（环境变量或命令行）不会误触发用户登录，命令行身份优先。文档说明 2 小时 access token / 365 天 refresh token 的实际生命周期，以及为什么正常情况下不需要每 2 小时登录。详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.2.0** — 新增**多维表（`.dbt`）**支持：`dbsheet.py` 提供 schema / 分页过滤读 / 单条读 / 创建 / 快照 / 部分更新 / 删除 / 附件下载，写入前按记录级快照比对、写后逐字段读回；Link 显示名自动映射成记录 ID，非法选项/日期先校验，附件按 `uploadId` 换取签名 URL 并按文件头纠正扩展名（实测 PNG 实为 JPEG）。同步补上 15 条多维表硬约束与 Form/FlexPaper 限制，Codex 适配、打包清单和 README 均已更新。详见 [CHANGELOG.md](CHANGELOG.md)。

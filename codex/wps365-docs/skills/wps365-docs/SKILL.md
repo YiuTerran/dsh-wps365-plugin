@@ -13,7 +13,7 @@ Before running a document script, resolve these values from the current machine 
 
 - {skillDir} is the directory containing this SKILL.md, using the actual path shown by the loaded skill catalog. Do not guess a plugin or cache directory.
 - {python}: when available, call mcp__codex_app__load_workspace_dependencies and use its bundled Python path. Otherwise probe python3 and then python, using the first interpreter that starts. Check import openpyxl for .xlsx parsing/editing and import docx when a task needs python-docx; choose an interpreter that has the required package. Do not install packages automatically.
-- {cli}: use the bundled _wps_cli.resolve() helper to locate the local executable. The helper lives at {skillDir}/scripts/_wps_cli.py in the packaged skill. Import it by adding that scripts directory to sys.path, call resolve(), and print the returned path. If it returns the default path but that file is absent, treat the CLI as unavailable. Do not run config init, device login, or an installer on the user's behalf.
+- {cli}: use the bundled _wps_cli.resolve() helper to locate the local executable. The helper lives at {skillDir}/scripts/_wps_cli.py in the packaged skill. Import it by adding that scripts directory to sys.path, call resolve(), and print the returned path. If it returns the default path but that file is absent, treat the CLI as unavailable. Resource discovery must not initialize configuration, install software, or start login. Once the installed CLI is resolved, follow the authentication recovery procedure below.
 - {tmp}: create a temporary directory with Python's tempfile.mkdtemp() and use the returned absolute path for exports, snapshots, and backups.
 
 Keep tool discovery read-only. Use the temporary directory for required local exports, backups, snapshots, and edited files. Quote executable and file paths. Resolve the CLI by importing _wps_cli.resolve with the scripts folder on sys.path and printing the returned path.
@@ -42,11 +42,27 @@ If wps365-cli is missing, stop before cloud operations and explain that the user
 
 The access token is valid for **2 hours**, but wps365-cli refreshes it about 10 seconds before expiry and retries a 401 transparently. The delegated **refresh token is valid for 365 days** and rotates on every refresh, so a normal installation needs `auth login --device` about once a year, not every two hours. Re-login is needed when the refresh token expires or is revoked, the token store is lost, or the CLI falls back to app identity and the API reports `required delegated scopes`. A fresh device login may report `refresh_token_expires_at` as `0001-01-01` (Go's zero time, meaning the response carried no expiry); that is **unknown, not expired**. `auth.py status` labels it as unknown and does not trigger a refresh or login.
 
-The shipped scripts already recover on these errors: they run `auth refresh --delegated`, then `auth login --device` (wps365-cli opens the browser), and retry the original command once. Set `WPS365_NO_AUTO_LOGIN=1` to disable the automatic browser prompt. For direct `{cli} api` or `{cli} dbsheet` commands, run this first when an auth error appears:
+**Mandatory before direct CLI calls:** before the first direct `{cli} api` or `{cli} dbsheet` call in a document task, including shared-link metadata resolution, execute the following command and check that it succeeds. The shipped document scripts use `_wps_cli.run_cli()` for recovery, but a direct CLI command bypasses that wrapper. An explicitly requested app-identity operation is the exception; preserve that identity.
 
     "{python}" "{skillDir}/scripts/auth.py" ensure --cli "{cli}"
 
-Use `auth.py status` to inspect only, or add `--json` to see `has_refresh` and `refresh_token_expires_at`. Do not set `WPS365_ACCESS_TOKEN` for normal use: it bypasses storage and automatic refresh, so it really does expire after two hours. There is no user authorization longer than the refresh token; `WPS365_AUTH=app` (client credentials) works unattended but cannot replace user-context document permissions.
+PowerShell form:
+
+    & "{python}" "{skillDir}/scripts/auth.py" ensure --cli "{cli}"
+
+`ensure` checks the stored user identity, tries `auth refresh --delegated` when needed, and verifies the result. Only if refresh fails does it run `auth login --device`, where the user approves in the browser. This recovery is part of the requested document operation. `auth.py status` (with or without `--json`) only inspects credentials; it never refreshes them. `has_refresh: true` means a refresh token is stored, not that a refresh was attempted or succeeded.
+
+If a direct call fails with an expired/invalid user token, `required delegated scopes`, or `delegated token unavailable, using app identity` (even alongside `403 invalid_scope`), execute:
+
+    "{python}" "{skillDir}/scripts/auth.py" ensure --force-refresh --cli "{cli}"
+
+In PowerShell, prefix that command with `&`. This bypasses a locally valid expiry when the server has rejected the token. After successful recovery, retry the original command once. A bare `403 invalid_scope` or permission denial with a confirmed user identity may be a real scope restriction; do not repeatedly refresh or log in for it.
+
+Do not stop at `status`, switch to a browser, or conclude that the user lacks document access while this recovery step is still unattempted. If the sandbox denies access to the CLI credential store or token writes, request the required execution permission and retry that same recovery step. Report an actual approval denial if one occurs.
+
+Do not set `WPS365_NO_AUTO_LOGIN=1` or `WPS365_AUTO_LOGIN=0` on the user's behalf. Honor either setting when the user or environment already configured it: it disables the device-login prompt, **not refresh**. Try refresh first; if it fails and login is disabled, report that the user must log in. Distinguish refresh attempted, refresh verified, and original request retried in the result. Do not claim recovery succeeded from `status` alone.
+
+Do not set `WPS365_ACCESS_TOKEN` for normal use: it bypasses storage and automatic refresh, so it really does expire after two hours. There is no user authorization longer than the refresh token; `WPS365_AUTH=app` (client credentials) works unattended but cannot replace user-context document permissions.
 
 ## Choose the document path
 
@@ -87,12 +103,14 @@ For a multi-dimensional table, read the schema first and then page through recor
 
 Read doc.md for extracted text and tables, and inspect meta.json for the cloud file baseline. For .xlsx, local parsing with openpyxl preserves formula text in the extracted view; API-only values may omit formulas or display rounded values. Use the locally downloaded original for Office edits.
 
-If the user provides a WPS sharing link instead of a file_id, obtain its link_id from the final path segment and resolve the metadata with the local CLI. Then use the returned file_id with the appropriate fetch script:
+If the user provides a WPS sharing link instead of a file_id, obtain its link_id from the final path segment. Run the authentication prerequisite first, then resolve metadata with the local CLI. Execute each command separately and proceed only after `ensure` succeeds. Use the returned file_id with the appropriate fetch script:
 
+    "{python}" "{skillDir}/scripts/auth.py" ensure --cli "{cli}"
     "{cli}" api get /v7/links/<link_id>/meta -o json
 
 PowerShell form:
 
+    & "{python}" "{skillDir}/scripts/auth.py" ensure --cli "{cli}"
     & "{cli}" api get /v7/links/<link_id>/meta -o json
 
 ## Before every cloud write

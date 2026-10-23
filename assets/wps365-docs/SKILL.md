@@ -14,8 +14,11 @@ description: 读取或写入 WPS 365 云文档。智能文档（.otl / airpage�
 - `wps365-cli` 的 access token 只有 2 小时，但 CLI 会在过期前 10 秒自动刷新，并在 401 时透明重试。用户 refresh token 有效 **365 天**，每次刷新会轮换；正常情况下 `auth login --device` **一年一次**即可，不是每 2 小时一次。
 - 只有 refresh token 过期/被撤销、keyring 中的 token 丢失，或 CLI 回退到 app 身份后报 `required delegated scopes`，才需要重新登录。
 - 刚完成设备码登录时，CLI 可能把 `refresh_token_expires_at` 返回为 `0001-01-01`（Go 零值，表示响应未带有效期），**这不是过期**；`auth.py status` 会显示“未知”，恢复逻辑也不会因此刷新或重登。
-- 本目录脚本的 `run_cli` 已内置恢复：遇到上述授权错误先运行 `auth refresh --delegated`，失败则自动运行 `auth login --device`（CLI 会打开浏览器）并重试一次。设置 `WPS365_NO_AUTO_LOGIN=1` 可禁用自动弹窗。
-- 直接调用 `{cli} api` / `{cli} dbsheet` 前，先执行一次 `{python} {skillDir}/scripts/auth.py ensure --cli "{cli}"`；只查看状态用 `status`，加 `--json` 可看到 refresh token 的过期时间。
+- 本目录脚本的 `run_cli` 已内置恢复：遇到上述授权错误先运行 `auth refresh --delegated`，失败则自动运行 `auth login --device`（用户在浏览器确认授权）并重试一次。直接运行 CLI 不会经过这层封装。
+- **硬性前置步骤**：文档任务首次直接调用 `{cli} api` / `{cli} dbsheet` 前（包括分享链接换取元数据），必须执行 `"{python}" "{skillDir}/scripts/auth.py" ensure --cli "{cli}"`，成功后再发业务请求。用户明确要求 app 身份操作时保留该身份，不执行用户授权恢复。
+- 直接调用遇到 token 失效、`required delegated scopes`，或 `delegated token unavailable, using app identity`（即使随后是 `403 invalid_scope`），执行 `"{python}" "{skillDir}/scripts/auth.py" ensure --force-refresh --cli "{cli}"`，成功后重试原命令一次。只有 `403 invalid_scope`、且确认正在使用用户身份时，可能是真正的 scope 限制，不反复刷新或登录。
+- `status` / `status --json` **只检查、不刷新**；`has_refresh: true` 只说明存有 refresh token，不代表刷新过或刷新成功。恢复尚未尝试时，不要停在状态说明、转浏览器或断言用户没有权限。凭据读写被沙盒拦截时，应申请所需执行权限并重试恢复；获拒后如实报告。
+- 不要自行设置 `WPS365_NO_AUTO_LOGIN=1` / `WPS365_AUTO_LOGIN=0`。若用户或环境已配置，应遵守：这只禁用设备码登录弹窗，**不禁用 refresh**；仍须先刷新，失败后再说明需要用户登录。报告时区分“已尝试刷新”“刷新后验证成功”“原请求已重试”。
 - 不要把 `WPS365_ACCESS_TOKEN` 写进环境变量：它会跳过 token 存储和自动刷新，2 小时后必然失效。也没有比 refresh token 更长的用户授权；`WPS365_AUTH=app` 的 client_credentials 适合无人值守，但不能替代用户态文档权限。
 
 本文件只放**必须立刻知道**的规则与命令骨架，细节按需读 `{skillDir}/references/`：
@@ -70,7 +73,7 @@ description: 读取或写入 WPS 365 云文档。智能文档（.otl / airpage�
 - 长文档**别把正文打进 stdout**：默认只给清单，正文用 `read` 分页读 `<out>/doc.md`（`--print-text` 慎用）
 - 图片按清单里的图号读：`read_image("<out>/img/0041_XXXX.png")`；先读 `doc.md` 判断哪张真要看
 - **不要把导出响应原文读进上下文**：`.otl` 的 `data.content` 是 base64（某篇 5.2 万字符 ≈ 13k tokens），脚本已本地解码，只打印清单
-- 只有分享链接时：先 `{cli} api get /v7/links/<link_id>/meta -o json` 换出 `file_id`
+- 只有分享链接时：先执行 `"{python}" "{skillDir}/scripts/auth.py" ensure --cli "{cli}"`，成功后再单独执行 `"{cli}" api get /v7/links/<link_id>/meta -o json` 换出 `file_id`
 - `.xlsx` 默认走本地 openpyxl 解析（**唯一能拿到公式原文**的方式），要用本机资源那节给的 `{python}`
 - `.dbt` 不是文件夹：`drive file list` 会返回空，`file-content` 报“文档内容抽取失败”；读结构和记录只能走 dbsheet 接口。Form 视图不承载记录，FlexPaper 工作表读不了正文/记录，具体见 `references/dbsheet.md`
 
