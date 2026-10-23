@@ -450,6 +450,13 @@ class CredentialRecoveryTest(unittest.TestCase):
         self.assertEqual(invoke.call_count, 1)
         ensure.assert_not_called()
 
+    def test_successful_document_content_is_not_interpreted_as_a_storage_error(self):
+        payload = json.dumps({"content": self.BLOCKED})
+        with mock.patch.object(_wps_cli, "_invoke", return_value=
+                               subprocess.CompletedProcess([], 0, payload, "")):
+            self.assertEqual(_wps_cli.run_cli(
+                ["cli", "api", "get", "/x"], 30, "test", "GET /x"), payload)
+
     def test_retry_storage_failure_is_classified_without_a_second_recovery(self):
         replies = [subprocess.CompletedProcess([], 1, "", "invalid_token"),
                    subprocess.CompletedProcess([], 1, "", self.BLOCKED)]

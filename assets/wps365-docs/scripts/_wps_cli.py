@@ -467,14 +467,16 @@ def run_cli(cmd: list[str], timeout: int, label: str, what: str) -> str:
     """
     global _AUTH_RECOVERY_ATTEMPTED
     proc = _invoke(cmd, timeout)
-    _check_credential_store((proc.stderr or "") + "\n" + (proc.stdout or ""), label)
+    if proc.returncode != 0:
+        _check_credential_store((proc.stderr or "") + "\n" + (proc.stdout or ""), label)
     detail = (proc.stderr or proc.stdout or "").strip()[:600]
     if proc.returncode != 0 and not _uses_app_identity(cmd) \
             and _looks_like_auth_error(detail) and not _AUTH_RECOVERY_ATTEMPTED:
         _AUTH_RECOVERY_ATTEMPTED = True
         if ensure_auth(cmd[0], label=label, force_refresh=True):
             proc = _invoke(cmd, timeout)
-            _check_credential_store((proc.stderr or "") + "\n" + (proc.stdout or ""), label)
+            if proc.returncode != 0:
+                _check_credential_store((proc.stderr or "") + "\n" + (proc.stdout or ""), label)
             detail = (proc.stderr or proc.stdout or "").strip()[:600]
     if proc.returncode != 0:
         sys.exit(f"[{label}] {what} 失败（退出码 {proc.returncode}）：{detail}")

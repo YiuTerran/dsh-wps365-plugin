@@ -194,6 +194,7 @@ The package is published to npm (`publishConfig.access: public`). The release pr
 
 ## Changelog
 
+- **0.2.5** — Checks credential-storage errors only for failed business commands, preserving successful document content that happens to contain error messages. Adds a regression and reruns the full checks. See [CHANGELOG.md](CHANGELOG.md).
 - **0.2.4** — Separates credential storage denials, rejected refresh grants, and CLI/network/server failures. Storage denials stop recovery and request execution permission instead of repeating login. Device verification stays visible; adds 15 auth regressions including fixture CLI process checks. See [CHANGELOG.md](CHANGELOG.md).
 - **0.2.3** — Requires `auth.py ensure` before direct CLI calls, including shared-link metadata; clarifies user-identity recovery after app fallback, read-only `status`, and refresh with device login disabled. Adds `ensure --force-refresh` for remote auth rejection despite a locally valid token, and fixes the GitHub Release workflow. See [CHANGELOG.md](CHANGELOG.md).
 - **0.2.2** — Fixes a fresh device login's `refresh_token_expires_at: 0001-01-01` being misread as expired: missing, zero, and malformed values are treated as unknown, `auth.py status` labels them as such, and recovery does not refresh or re-login. See [CHANGELOG.md](CHANGELOG.md).
