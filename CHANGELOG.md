@@ -3,6 +3,20 @@
 本文件记录面向使用者的变更；每个版本的细节也同步写在 `README.md` 的「更新记录」一节。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.4] - 2026-10-23
+
+### 修复
+
+- **凭据存储被拒绝时停止认证恢复。** `auth status`、refresh、设备码登录和业务命令（含恢复后重试）识别凭据相关的 `operation not permitted` / `permission denied` 等错误，输出 `credential_store_blocked`，要求申请所需执行权限后重试。不再把保存失败解释成 token 过期，也不在相同权限下重复登录或宣称保存成功。
+- **按刷新失败原因决定是否登录。** `invalid_grant` / refresh token 不存在时输出 `refresh_grant_rejected`，仍允许设备码登录；缺少本地 refresh token 时直接走登录。CLI 启动/超时、网络、服务端和响应格式异常输出 `auth_refresh_failed` 并停止，避免不必要的登录。
+- 设备码登录继续实时展示验证地址和结果，同时保留有限长度的输出用于识别凭据保存失败。超时会终止登录子进程。
+- Codex 与 DSH 同步说明沙盒提权和 refresh token 轮换后保存失败的恢复方法；插件不会自动修改用户全局权限配置。新增诊断不打印 access token / refresh token 值。
+
+### 验证
+
+- 新增 15 项认证回归，包括 Windows/POSIX 错误、权限与 scope 区分、失败后不重试业务、不继续登录、服务端拒绝后的恢复、网络/超时/异常响应、登录输出和子进程清理。
+- 其中 6 种场景通过假 CLI 子进程验证 `auth.py ensure` 的完整命令序列和退出行为；这些是本地模拟，不代表真实 WPS 服务端拒绝或沙盒故障的云端复现。
+
 ## [0.2.3] - 2026-10-23
 
 ### 修复

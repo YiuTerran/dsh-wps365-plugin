@@ -32,6 +32,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 
 #: Command name shared by every platform; Windows appends its own extension.
 BASENAME = "wps365-cli"
@@ -199,12 +200,36 @@ def _looks_like_auth_error(detail: str) -> bool:
     return re.search(r"(?<!\d)401(?!\d)", text) is not None
 
 
+def _check_credential_store(detail: str, label: str = "auth") -> None:
+    """Stop recovery when local credential access, rather than OAuth, is denied."""
+    text = detail.lower()
+    denied = any(hint in text for hint in (
+        "operation not permitted", "permission denied", "access is denied",
+        "access denied", "read-only file system", "拒绝访问",
+    ))
+    store = any(hint in text for hint in (
+        "keyring", "credential store", "credential file", "credentials.json",
+        "save credential", "load credential", "save delegated token", "save app token",
+        "load delegated token", "load app token", "token store",
+        "wps365-cli/", "wps365-cli\\",
+    ))
+    if denied and store:
+        sys.exit(
+            f"[{label}] credential_store_blocked: 本地凭据读写被拒绝（沙盒或目录权限），"
+            "不能据此判断 token 过期，也不能确认新 token 已保存。"
+            "请申请所需沙盒外执行权限后重跑认证恢复命令，并用 auth status 验证；"
+            "若宿主不支持提权，请在本机终端完成认证。"
+            "刷新可能已轮换服务端 token，保存失败后若出现 invalid_grant，需重新登录。"
+        )
+
+
 def auth_status(cli: str, timeout: int = AUTH_TIMEOUT) -> dict | None:
     """Return ``wps365-cli auth status -o json``, or ``None`` if unavailable."""
     try:
         proc = _invoke([cli, "auth", "status", "-o", "json"], timeout)
     except (OSError, subprocess.SubprocessError):
         return None
+    _check_credential_store((proc.stderr or "") + "\n" + (proc.stdout or ""))
     if proc.returncode != 0:
         return None
     try:
@@ -267,18 +292,60 @@ def _refresh_expired(status: dict | None) -> bool:
 
 
 def _refresh_delegated(cli: str, timeout: int = AUTH_TIMEOUT) -> bool:
-    """Refresh only the user token; ``refreshed:false`` is still exit code 0."""
+    """Only a rejected/missing grant can fall back to browser login."""
     try:
         proc = _invoke([cli, "auth", "refresh", "--delegated", "-o", "json"], timeout)
     except (OSError, subprocess.SubprocessError):
-        return False
+        sys.exit("[auth] auth_refresh_failed: 无法完成刷新命令（启动或超时错误）；"
+                 "尚不能判断 token 是否失效，请检查 CLI/网络后重试。")
+    detail = (proc.stderr or "") + "\n" + (proc.stdout or "")
+    _check_credential_store(detail)
     if proc.returncode != 0:
-        return False
+        if any(hint in detail.lower() for hint in (
+            "invalid_grant", "invalid refresh token", "refresh token expired",
+            "refresh token not found", "token not found",
+            "no delegated token", "delegated token not found",
+        )):
+            print("[auth] refresh_grant_rejected: 服务端拒绝或找不到 refresh token；"
+                  "本地记录未到期也不代表它仍有效。", file=sys.stderr, flush=True)
+            return False
+        sys.exit("[auth] auth_refresh_failed: 刷新未成功，且未确认 refresh token 失效；"
+                 "请检查 CLI/网络/服务端状态后重试，不自动发起设备码登录。")
     try:
         data = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
-        return False
-    return bool((data.get("delegated") or {}).get("refreshed"))
+        sys.exit("[auth] auth_refresh_failed: 刷新响应不是有效 JSON，无法确认结果；"
+                 "请检查 auth status 后重试。")
+    delegated = data.get("delegated") if isinstance(data, dict) else None
+    if not isinstance(delegated, dict) or not isinstance(delegated.get("refreshed"), bool):
+        sys.exit("[auth] auth_refresh_failed: 刷新响应缺少 delegated.refreshed 布尔值；"
+                 "请检查 auth status 后重试。")
+    return delegated["refreshed"]
+
+
+def _stream_login(cmd: list[str], timeout: int) -> tuple[int, str]:
+    """Keep device instructions live while retaining a bounded output tail."""
+    tail = ""
+    with subprocess.Popen(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          encoding=CLI_ENCODING, errors="replace") as proc:
+        def relay() -> None:
+            nonlocal tail
+            for line in proc.stdout:
+                tail = (tail + line)[-8192:]
+                sys.stderr.write(line)
+                sys.stderr.flush()
+
+        reader = threading.Thread(target=relay, daemon=True)
+        reader.start()
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise
+        finally:
+            reader.join()
+    return proc.returncode, tail
 
 
 def _login_delegated(cli: str, label: str, timeout: int = AUTH_LOGIN_TIMEOUT) -> bool:
@@ -295,10 +362,7 @@ def _login_delegated(cli: str, label: str, timeout: int = AUTH_LOGIN_TIMEOUT) ->
           "请在浏览器中确认授权（若没有自动打开，按终端提示访问 URL）。",
           file=sys.stderr, flush=True)
     try:
-        # Do not capture: the CLI prints the device code / verification URL live.
-        # If the browser cannot open, the user still sees how to finish the login.
-        proc = subprocess.run([cli, "auth", "login", "--device"], text=True,
-                              timeout=timeout, encoding=CLI_ENCODING, errors="replace")
+        returncode, detail = _stream_login([cli, "auth", "login", "--device"], timeout)
     except subprocess.TimeoutExpired:
         print(f"[{label}] 设备码授权等待超时（{timeout}s），请手动运行 "
               f"{cli} auth login --device", file=sys.stderr)
@@ -306,8 +370,9 @@ def _login_delegated(cli: str, label: str, timeout: int = AUTH_LOGIN_TIMEOUT) ->
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"[{label}] 无法启动设备码授权：{exc}", file=sys.stderr)
         return False
-    if proc.returncode != 0:
-        print(f"[{label}] 设备码授权失败（退出码 {proc.returncode}）；"
+    _check_credential_store(detail, label)
+    if returncode != 0:
+        print(f"[{label}] 设备码授权失败（退出码 {returncode}）；"
               "请查看上面的 CLI 提示。", file=sys.stderr)
         return False
     return True
@@ -350,7 +415,8 @@ def ensure_auth(cli: str, label: str = "wps365", timeout: int = AUTH_TIMEOUT,
         # checks; run_cli forces recovery after the API rejects the identity.
         return True
 
-    if _refresh_delegated(cli, timeout):
+    if delegated.get("available") and delegated.get("has_refresh") \
+            and _refresh_delegated(cli, timeout):
         status = auth_status(cli, timeout)
         if _delegated_usable(status) and _delegated(status).get("has_refresh") \
                 and not _refresh_expired(status):
@@ -359,7 +425,7 @@ def ensure_auth(cli: str, label: str = "wps365", timeout: int = AUTH_TIMEOUT,
         print(f"[{label}] refresh 返回成功但授权仍不可用，继续尝试设备码登录。",
               file=sys.stderr, flush=True)
     else:
-        print(f"[{label}] 无法刷新用户 token（refresh token 可能已过期），"
+        print(f"[{label}] 未恢复用户 token（授权被拒绝或无可刷新凭据），"
               "改用设备码登录。", file=sys.stderr, flush=True)
 
     if not _login_delegated(cli, label, login_timeout):
@@ -401,12 +467,14 @@ def run_cli(cmd: list[str], timeout: int, label: str, what: str) -> str:
     """
     global _AUTH_RECOVERY_ATTEMPTED
     proc = _invoke(cmd, timeout)
+    _check_credential_store((proc.stderr or "") + "\n" + (proc.stdout or ""), label)
     detail = (proc.stderr or proc.stdout or "").strip()[:600]
     if proc.returncode != 0 and not _uses_app_identity(cmd) \
             and _looks_like_auth_error(detail) and not _AUTH_RECOVERY_ATTEMPTED:
         _AUTH_RECOVERY_ATTEMPTED = True
         if ensure_auth(cmd[0], label=label, force_refresh=True):
             proc = _invoke(cmd, timeout)
+            _check_credential_store((proc.stderr or "") + "\n" + (proc.stdout or ""), label)
             detail = (proc.stderr or proc.stdout or "").strip()[:600]
     if proc.returncode != 0:
         sys.exit(f"[{label}] {what} 失败（退出码 {proc.returncode}）：{detail}")

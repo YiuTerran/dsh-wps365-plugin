@@ -14,10 +14,12 @@ description: 读取或写入 WPS 365 云文档。智能文档（.otl / airpage�
 - `wps365-cli` 的 access token 只有 2 小时，但 CLI 会在过期前 10 秒自动刷新，并在 401 时透明重试。用户 refresh token 有效 **365 天**，每次刷新会轮换；正常情况下 `auth login --device` **一年一次**即可，不是每 2 小时一次。
 - 只有 refresh token 过期/被撤销、keyring 中的 token 丢失，或 CLI 回退到 app 身份后报 `required delegated scopes`，才需要重新登录。
 - 刚完成设备码登录时，CLI 可能把 `refresh_token_expires_at` 返回为 `0001-01-01`（Go 零值，表示响应未带有效期），**这不是过期**；`auth.py status` 会显示“未知”，恢复逻辑也不会因此刷新或重登。
-- 本目录脚本的 `run_cli` 已内置恢复：遇到上述授权错误先运行 `auth refresh --delegated`，失败则自动运行 `auth login --device`（用户在浏览器确认授权）并重试一次。直接运行 CLI 不会经过这层封装。
+- 本目录脚本的 `run_cli` 已内置恢复：遇到上述授权错误先运行 `auth refresh --delegated`，refresh token 被拒绝或缺失时自动运行 `auth login --device`（用户在浏览器确认授权），恢复成功后重试一次。存储权限、网络或服务端异常会停止并提示原因。直接运行 CLI 不会经过这层封装。
 - **硬性前置步骤**：文档任务首次直接调用 `{cli} api` / `{cli} dbsheet` 前（包括分享链接换取元数据），必须执行 `"{python}" "{skillDir}/scripts/auth.py" ensure --cli "{cli}"`，成功后再发业务请求。用户明确要求 app 身份操作时保留该身份，不执行用户授权恢复。
 - 直接调用遇到 token 失效、`required delegated scopes`，或 `delegated token unavailable, using app identity`（即使随后是 `403 invalid_scope`），执行 `"{python}" "{skillDir}/scripts/auth.py" ensure --force-refresh --cli "{cli}"`，成功后重试原命令一次。只有 `403 invalid_scope`、且确认正在使用用户身份时，可能是真正的 scope 限制，不反复刷新或登录。
 - `status` / `status --json` **只检查、不刷新**；`has_refresh: true` 只说明存有 refresh token，不代表刷新过或刷新成功。恢复尚未尝试时，不要停在状态说明、转浏览器或断言用户没有权限。凭据读写被沙盒拦截时，应申请所需执行权限并重试恢复；获拒后如实报告。
+- **区分认证与凭据存储错误**：`credential_store_blocked` 或 `keyring.key` / 保存 token 时的 `operation not permitted`、`permission denied` 表示本地凭据读写被拒绝；脚本会停止，不能当成 token 过期而在相同权限下反复登录。申请沙盒外执行权限后重跑认证恢复命令，再读回 `auth status`；宿主不支持提权时，说明需要在本机终端完成认证。插件本身不能扩大沙盒权限，也不要自动修改全局权限配置。服务端 refresh token 可能已轮换但本地保存失败；恢复权限后若报 `invalid_grant`，重新登录获取并保存新凭据。
+- `refresh_grant_rejected` 表示服务端拒绝/找不到 refresh token，即使本地记录仍在一年有效期内，也要重新登录。`auth_refresh_failed` 表示网络、CLI 启动/超时、服务端或响应格式异常，不能据此判断 token 过期；先解决对应错误并重试，不自动发起设备码登录。诊断不得输出 access token / refresh token。
 - 不要自行设置 `WPS365_NO_AUTO_LOGIN=1` / `WPS365_AUTO_LOGIN=0`。若用户或环境已配置，应遵守：这只禁用设备码登录弹窗，**不禁用 refresh**；仍须先刷新，失败后再说明需要用户登录。报告时区分“已尝试刷新”“刷新后验证成功”“原请求已重试”。
 - 不要把 `WPS365_ACCESS_TOKEN` 写进环境变量：它会跳过 token 存储和自动刷新，2 小时后必然失效。也没有比 refresh token 更长的用户授权；`WPS365_AUTH=app` 的 client_credentials 适合无人值守，但不能替代用户态文档权限。
 

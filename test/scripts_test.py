@@ -388,6 +388,222 @@ class AuthCommandTest(unittest.TestCase):
         self.assertEqual(output.getvalue(), "")
 
 
+class CredentialRecoveryTest(unittest.TestCase):
+    """Storage failures stop recovery before another login or cloud request."""
+
+    BLOCKED = ("save delegated token: open /home/user/wps365-cli/keyring.key: "
+               "operation not permitted")
+
+    def setUp(self):
+        _wps_cli._AUTH_RECOVERY_ATTEMPTED = False
+        env = mock.patch.dict(os.environ, {
+            "WPS365_ACCESS_TOKEN": "", "WPS365_AUTH": "delegated",
+            "WPS365_NO_AUTO_LOGIN": "", "WPS365_AUTO_LOGIN": "",
+        })
+        env.start()
+        self.addCleanup(env.stop)
+        self.addCleanup(setattr, _wps_cli, "_AUTH_RECOVERY_ATTEMPTED", False)
+
+    def test_storage_denials_are_distinct_from_remote_scope_denials(self):
+        for message in (
+            self.BLOCKED,
+            r"open C:\Users\user\wps365-cli\keyring.key: Access is denied.",
+            "load delegated token: credentials: permission denied",
+            "save app token: read-only file system",
+        ):
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(SystemExit, "credential_store_blocked"):
+                    _wps_cli._check_credential_store(message)
+        _wps_cli._check_credential_store("403 invalid_scope: permission denied")
+        _wps_cli._check_credential_store("refresh token endpoint: permission denied")
+        _wps_cli._check_credential_store("401 invalid_client: credentials access denied")
+
+    def test_status_storage_denial_does_not_start_refresh_or_login(self):
+        denied = subprocess.CompletedProcess([], 1, "", self.BLOCKED)
+        with mock.patch.object(_wps_cli, "_invoke", return_value=denied), \
+                mock.patch.object(_wps_cli, "_refresh_delegated") as refresh, \
+                mock.patch.object(_wps_cli, "_login_delegated") as login:
+            with self.assertRaisesRegex(SystemExit, "credential_store_blocked"):
+                _wps_cli.ensure_auth("cli")
+        refresh.assert_not_called()
+        login.assert_not_called()
+
+    def test_refresh_save_failure_stops_before_login_and_hides_raw_secrets(self):
+        denied = subprocess.CompletedProcess(
+            [], 1, "", self.BLOCKED + " refresh_token=fixture-secret")
+        with mock.patch.object(_wps_cli, "auth_status",
+                               return_value=AuthRecoveryTest._status()), \
+                mock.patch.object(_wps_cli, "_invoke", return_value=denied), \
+                mock.patch.object(_wps_cli, "_login_delegated") as login:
+            with self.assertRaises(SystemExit) as caught:
+                _wps_cli.ensure_auth("cli")
+        login.assert_not_called()
+        self.assertIn("credential_store_blocked", str(caught.exception))
+        self.assertNotIn("fixture-secret", str(caught.exception))
+
+    def test_business_storage_failure_does_not_enter_oauth_recovery(self):
+        denied = subprocess.CompletedProcess([], 1, "", self.BLOCKED)
+        with mock.patch.object(_wps_cli, "_invoke", return_value=denied) as invoke, \
+                mock.patch.object(_wps_cli, "ensure_auth") as ensure:
+            with self.assertRaisesRegex(SystemExit, "credential_store_blocked"):
+                _wps_cli.run_cli(["cli", "api", "get", "/x"], 30, "test", "GET /x")
+        self.assertEqual(invoke.call_count, 1)
+        ensure.assert_not_called()
+
+    def test_retry_storage_failure_is_classified_without_a_second_recovery(self):
+        replies = [subprocess.CompletedProcess([], 1, "", "invalid_token"),
+                   subprocess.CompletedProcess([], 1, "", self.BLOCKED)]
+        with mock.patch.object(_wps_cli, "_invoke", side_effect=replies) as invoke, \
+                mock.patch.object(_wps_cli, "ensure_auth", return_value=True) as ensure:
+            with self.assertRaisesRegex(SystemExit, "credential_store_blocked"):
+                _wps_cli.run_cli(["cli", "api", "get", "/x"], 30, "test", "GET /x")
+        self.assertEqual(invoke.call_count, 2)
+        ensure.assert_called_once()
+
+    def test_invalid_grant_still_recovers_through_device_login(self):
+        rejected = subprocess.CompletedProcess(
+            [], 1, "", '401 invalid_grant: The refresh token has not been found: not_found')
+        with mock.patch.object(_wps_cli, "auth_status", side_effect=[
+                AuthRecoveryTest._status(), AuthRecoveryTest._status("valid")]), \
+                mock.patch.object(_wps_cli, "_invoke", return_value=rejected), \
+                mock.patch.object(_wps_cli, "_login_delegated", return_value=True) as login, \
+                contextlib.redirect_stderr(io.StringIO()) as output:
+            self.assertTrue(_wps_cli.ensure_auth("cli"))
+        login.assert_called_once()
+        self.assertIn("refresh_grant_rejected", output.getvalue())
+
+    def test_missing_refresh_token_goes_directly_to_device_login(self):
+        with mock.patch.object(_wps_cli, "auth_status", side_effect=[
+                AuthRecoveryTest._status("not_found", False),
+                AuthRecoveryTest._status("valid")]), \
+                mock.patch.object(_wps_cli, "_refresh_delegated") as refresh, \
+                mock.patch.object(_wps_cli, "_login_delegated", return_value=True) as login, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertTrue(_wps_cli.ensure_auth("cli"))
+        refresh.assert_not_called()
+        login.assert_called_once()
+
+    def test_transient_and_client_errors_do_not_start_device_login(self):
+        for message in ("503 Service Unavailable", "network timeout",
+                        "401 invalid_client", "404 endpoint not_found"):
+            with self.subTest(message=message):
+                reply = subprocess.CompletedProcess([], 1, "", message)
+                with mock.patch.object(_wps_cli, "auth_status",
+                                       return_value=AuthRecoveryTest._status()), \
+                        mock.patch.object(_wps_cli, "_invoke", return_value=reply), \
+                        mock.patch.object(_wps_cli, "_login_delegated") as login:
+                    with self.assertRaisesRegex(SystemExit, "auth_refresh_failed"):
+                        _wps_cli.ensure_auth("cli")
+                login.assert_not_called()
+
+    def test_refresh_timeout_does_not_start_device_login(self):
+        with mock.patch.object(_wps_cli, "auth_status",
+                               return_value=AuthRecoveryTest._status()), \
+                mock.patch.object(_wps_cli, "_invoke",
+                                  side_effect=subprocess.TimeoutExpired("cli", 1)), \
+                mock.patch.object(_wps_cli, "_login_delegated") as login:
+            with self.assertRaisesRegex(SystemExit, "auth_refresh_failed"):
+                _wps_cli.ensure_auth("cli")
+        login.assert_not_called()
+
+    def test_malformed_refresh_response_is_not_reported_as_expiry(self):
+        for payload in ("invalid-json", "[]", "{}", '{"delegated":[]}',
+                        '{"delegated":{"refreshed":"false"}}'):
+            with self.subTest(payload=payload), \
+                    mock.patch.object(_wps_cli, "_invoke", return_value=
+                                      subprocess.CompletedProcess([], 0, payload, "")):
+                with self.assertRaisesRegex(SystemExit, "auth_refresh_failed"):
+                    _wps_cli._refresh_delegated("cli")
+
+    def test_no_refresh_result_can_fall_back_to_login(self):
+        with mock.patch.object(_wps_cli, "_invoke", return_value=subprocess.CompletedProcess(
+                [], 0, '{"delegated":{"refreshed":false}}', "")):
+            self.assertFalse(_wps_cli._refresh_delegated("cli"))
+
+    def test_device_login_save_failure_is_not_reported_as_success(self):
+        with mock.patch.object(_wps_cli, "_stream_login", return_value=(1, self.BLOCKED)), \
+                contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaisesRegex(SystemExit, "credential_store_blocked"):
+                _wps_cli._login_delegated("cli", "test")
+
+    def test_login_stream_captures_both_channels_and_keeps_instructions_visible(self):
+        code = ("import sys; print('device verification URL', flush=True); "
+                "print('save delegated token: keyring.key: operation not permitted', "
+                "file=sys.stderr, flush=True); sys.exit(1)")
+        with contextlib.redirect_stderr(io.StringIO()) as output:
+            returncode, detail = _wps_cli._stream_login([sys.executable, "-c", code], 5)
+        self.assertEqual(returncode, 1)
+        self.assertIn("device verification URL", output.getvalue())
+        self.assertIn("keyring.key", detail)
+
+    def test_login_timeout_terminates_the_child(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                _wps_cli._stream_login(
+                    [sys.executable, "-c", "import time; time.sleep(10)"], 0.05)
+
+    @unittest.skipUnless(os.name == "posix", "executable fixture uses a POSIX shebang")
+    def test_auth_entrypoint_with_real_fixture_processes(self):
+        for scenario in ("refresh-blocked", "login-blocked", "status-blocked",
+                         "network-failure", "invalid-grant", "success"):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp:
+                cli = os.path.join(tmp, "fixture cli")
+                log = os.path.join(tmp, "calls.jsonl")
+                state = os.path.join(tmp, "logged-in")
+                source = f"""#!{sys.executable}
+import json, os, sys
+args = sys.argv[1:]
+scenario = {scenario!r}
+with open({log!r}, 'a') as stream:
+    stream.write(json.dumps(args) + '\\n')
+if args[:2] == ['auth', 'status']:
+    if scenario == 'status-blocked':
+        sys.exit({self.BLOCKED!r})
+    print(json.dumps({{'delegated': {{
+        'available': True, 'has_refresh': True,
+        'status': 'valid' if os.path.exists({state!r}) else 'expired'
+    }}}}))
+elif args[:2] == ['auth', 'refresh']:
+    if scenario == 'refresh-blocked':
+        sys.exit({self.BLOCKED!r})
+    if scenario == 'network-failure':
+        sys.exit('503 Service Unavailable')
+    if scenario in ('login-blocked', 'invalid-grant'):
+        sys.exit('401 invalid_grant: refresh token not found')
+    open({state!r}, 'w').close()
+    print('{{"delegated":{{"refreshed":true}}}}')
+elif args[:2] == ['auth', 'login']:
+    print('Confirm device authorization', flush=True)
+    if scenario == 'login-blocked':
+        sys.exit({self.BLOCKED!r})
+    open({state!r}, 'w').close()
+else:
+    sys.exit('unexpected command')
+"""
+                with open(cli, "w", encoding="utf-8") as stream:
+                    stream.write(source)
+                os.chmod(cli, 0o755)
+                proc = subprocess.run(
+                    [sys.executable, os.path.join(SCRIPTS, "auth.py"),
+                     "ensure", "--cli", cli],
+                    capture_output=True, text=True, timeout=15, encoding="utf-8")
+                with open(log, encoding="utf-8") as stream:
+                    calls = [json.loads(line)[:2] for line in stream]
+                if scenario in ("invalid-grant", "success"):
+                    self.assertEqual(proc.returncode, 0, proc.stderr)
+                    self.assertIn("valid", proc.stdout)
+                else:
+                    self.assertNotEqual(proc.returncode, 0)
+                    self.assertNotIn("✅", proc.stdout)
+                    self.assertIn("auth_refresh_failed" if scenario == "network-failure"
+                                  else "credential_store_blocked", proc.stderr)
+                    self.assertNotIn("请手动运行", proc.stderr)
+                self.assertEqual(calls.count(["auth", "login"]),
+                                 int(scenario in ("login-blocked", "invalid-grant")))
+                self.assertEqual(calls.count(["auth", "refresh"]),
+                                 int(scenario != "status-blocked"))
+
+
 class StdoutEncodingTest(unittest.TestCase):
     """The scripts' own output must survive a cp936 console."""
 

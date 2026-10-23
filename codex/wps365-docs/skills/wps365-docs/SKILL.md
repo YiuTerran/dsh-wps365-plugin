@@ -50,7 +50,11 @@ PowerShell form:
 
     & "{python}" "{skillDir}/scripts/auth.py" ensure --cli "{cli}"
 
-`ensure` checks the stored user identity, tries `auth refresh --delegated` when needed, and verifies the result. Only if refresh fails does it run `auth login --device`, where the user approves in the browser. This recovery is part of the requested document operation. `auth.py status` (with or without `--json`) only inspects credentials; it never refreshes them. `has_refresh: true` means a refresh token is stored, not that a refresh was attempted or succeeded.
+`ensure` checks the stored user identity, tries `auth refresh --delegated` when needed, and verifies the result. If the grant is rejected or no refresh token is available, it runs `auth login --device`, where the user approves in the browser. This recovery is part of the requested document operation. `auth.py status` (with or without `--json`) only inspects credentials; it never refreshes them. `has_refresh: true` means a refresh token is stored, not that a refresh was attempted or succeeded.
+
+**Credential storage failures are separate from expired grants.** `credential_store_blocked`, or `operation not permitted` / `permission denied` while accessing `keyring.key` or saving tokens, means local credential access was denied. The scripts stop instead of starting another device login under the same permissions. Request the required execution permission outside the sandbox, rerun the authentication recovery command, and read back `auth status`; if the host cannot elevate, explain that authentication must run in the user's local terminal. The plugin cannot expand its own sandbox permissions; do not automatically edit global permission settings. A failed save may follow server-side refresh-token rotation, so `invalid_grant` after restoring access requires a fresh login and successful save.
+
+`refresh_grant_rejected` means the server rejected or could not find the refresh token; a locally recorded one-year expiry does not override this rejection. Recovery may use device login. `auth_refresh_failed` instead means a CLI startup/timeout, network, server, or response-format problem: resolve it and retry without automatically opening device login. Never include access or refresh token values in diagnostics.
 
 If a direct call fails with an expired/invalid user token, `required delegated scopes`, or `delegated token unavailable, using app identity` (even alongside `403 invalid_scope`), execute:
 
