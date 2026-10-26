@@ -132,7 +132,7 @@ npm --prefix codex run build
 npm --prefix codex test
 ```
 
-构建需要 Node.js 22 或更高版本；生成 `.tar.gz` 归档还需要系统提供 `tar` 命令。无需运行 `npm install`，构建和检查使用 Node.js 内置模块。构建会生成完整插件目录 `codex/dist/wps365-docs/` 和归档 `codex/dist/wps365-docs-0.2.5.tar.gz`。请把**构建生成的目录**注册并安装；`codex/wps365-docs/` 是源码，不含构建复制进去的共享 Python 脚本，不能直接作为完整插件安装。
+构建需要 Node.js 22 或更高版本；生成 `.tar.gz` 归档还需要系统提供 `tar` 命令。无需运行 `npm install`，构建和检查使用 Node.js 内置模块。构建会生成完整插件目录 `codex/dist/wps365-docs/` 和归档 `codex/dist/wps365-docs-0.2.6.tar.gz`。请把**构建生成的目录**注册并安装；`codex/wps365-docs/` 是源码，不含构建复制进去的共享 Python 脚本，不能直接作为完整插件安装。
 
 在 Codex 中可以这样请求安装：
 
@@ -233,6 +233,7 @@ codex/                        # Codex 本地插件适配；构建与安装说明
 
 ## 更新记录
 
+- **0.2.6** — 受限沙盒中首次认证或云端调用就申请沙盒外执行，后续云端调用保持相同获准权限，避免浏览器授权后才发现无法保存。凭据目录可写探测作为兜底，增加失败阶段标记与 7 项回归。详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.2.5** — 将业务命令的权限错误检测限定于失败退出，避免成功读回的正文包含错误文字时误触发；新增回归并再次通过全量检查。详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.2.4** — 区分凭据存储权限、服务端拒绝 refresh token 与网络/服务端故障。沙盒阻止保存时立即停止并提示申请权限，不重复登录；登录继续实时显示验证提示，新增 15 项认证回归及假 CLI 流程验证。详见 [CHANGELOG.md](CHANGELOG.md)。
 - **0.2.3** — 强制直接 CLI 调用前执行 `auth.py ensure`，补全共享链接示例；明确 app 回退后先恢复用户身份再重试、`status` 不刷新、禁用自动登录仍允许 refresh。新增 `ensure --force-refresh` 处理远端拒绝但本地仍有效的 token，并修复 GitHub Release 工作流。详见 [CHANGELOG.md](CHANGELOG.md)。

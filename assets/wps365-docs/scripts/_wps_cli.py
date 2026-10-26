@@ -32,6 +32,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 
 #: Command name shared by every platform; Windows appends its own extension.
@@ -200,7 +201,7 @@ def _looks_like_auth_error(detail: str) -> bool:
     return re.search(r"(?<!\d)401(?!\d)", text) is not None
 
 
-def _check_credential_store(detail: str, label: str = "auth") -> None:
+def _check_credential_store(detail: str, label: str = "auth", stage: str = "unknown") -> None:
     """Stop recovery when local credential access, rather than OAuth, is denied."""
     text = detail.lower()
     denied = any(hint in text for hint in (
@@ -215,11 +216,33 @@ def _check_credential_store(detail: str, label: str = "auth") -> None:
     ))
     if denied and store:
         sys.exit(
-            f"[{label}] credential_store_blocked: 本地凭据读写被拒绝（沙盒或目录权限），"
+            f"[{label}] credential_store_blocked: stage={stage}；"
+            "本地凭据读写被拒绝（沙盒或目录权限），"
             "不能据此判断 token 过期，也不能确认新 token 已保存。"
             "请申请所需沙盒外执行权限后重跑认证恢复命令，并用 auth status 验证；"
             "若宿主不支持提权，请在本机终端完成认证。"
             "刷新可能已轮换服务端 token，保存失败后若出现 invalid_grant，需重新登录。"
+        )
+
+
+def _check_credential_write_access(status: dict | None, label: str) -> None:
+    """Probe the CLI directory before a remote refresh can rotate credentials.
+
+    This checks directory access, not native keychain availability. Older CLIs
+    without config_dir keep their existing behavior. No credential is touched.
+    """
+    config_dir = (status or {}).get("config_dir")
+    if not isinstance(config_dir, str) or not config_dir:
+        return
+    try:
+        with tempfile.TemporaryFile(dir=config_dir, prefix=".wps365-auth-probe-"):
+            pass
+    except OSError:
+        sys.exit(
+            f"[{label}] credential_store_blocked: stage=preflight；"
+            "CLI 凭据目录不可写，已在业务/刷新/登录请求之前停止，本次未发起 token 轮换。"
+            "请申请所需执行权限后重跑；后续业务命令也必须在凭据可写的同一权限环境运行，"
+            "因为普通读取也可能自动刷新。不会自动修改全局权限。"
         )
 
 
@@ -229,7 +252,7 @@ def auth_status(cli: str, timeout: int = AUTH_TIMEOUT) -> dict | None:
         proc = _invoke([cli, "auth", "status", "-o", "json"], timeout)
     except (OSError, subprocess.SubprocessError):
         return None
-    _check_credential_store((proc.stderr or "") + "\n" + (proc.stdout or ""))
+    _check_credential_store((proc.stderr or "") + "\n" + (proc.stdout or ""), stage="status")
     if proc.returncode != 0:
         return None
     try:
@@ -299,7 +322,7 @@ def _refresh_delegated(cli: str, timeout: int = AUTH_TIMEOUT) -> bool:
         sys.exit("[auth] auth_refresh_failed: 无法完成刷新命令（启动或超时错误）；"
                  "尚不能判断 token 是否失效，请检查 CLI/网络后重试。")
     detail = (proc.stderr or "") + "\n" + (proc.stdout or "")
-    _check_credential_store(detail)
+    _check_credential_store(detail, stage="refresh")
     if proc.returncode != 0:
         if any(hint in detail.lower() for hint in (
             "invalid_grant", "invalid refresh token", "refresh token expired",
@@ -370,7 +393,7 @@ def _login_delegated(cli: str, label: str, timeout: int = AUTH_LOGIN_TIMEOUT) ->
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"[{label}] 无法启动设备码授权：{exc}", file=sys.stderr)
         return False
-    _check_credential_store(detail, label)
+    _check_credential_store(detail, label, stage="login")
     if returncode != 0:
         print(f"[{label}] 设备码授权失败（退出码 {returncode}）；"
               "请查看上面的 CLI 提示。", file=sys.stderr)
@@ -407,6 +430,7 @@ def ensure_auth(cli: str, label: str = "wps365", timeout: int = AUTH_TIMEOUT,
         return False
 
     delegated = _delegated(status)
+    _check_credential_write_access(status, label)
     refresh_dead = _refresh_expired(status)
     if not force_refresh and _delegated_usable(status) \
             and delegated.get("has_refresh") and not refresh_dead:
@@ -466,9 +490,13 @@ def run_cli(cmd: list[str], timeout: int, label: str, what: str) -> str:
     :returns: the CLI's stdout, decoded.
     """
     global _AUTH_RECOVERY_ATTEMPTED
+    if not _uses_app_identity(cmd) and not os.environ.get("WPS365_ACCESS_TOKEN"):
+        # Even a read or auth-token call can refresh implicitly inside the CLI.
+        _check_credential_write_access(auth_status(cmd[0], min(max(1, timeout), AUTH_TIMEOUT)), label)
     proc = _invoke(cmd, timeout)
     if proc.returncode != 0:
-        _check_credential_store((proc.stderr or "") + "\n" + (proc.stdout or ""), label)
+        _check_credential_store((proc.stderr or "") + "\n" + (proc.stdout or ""), label,
+                                stage="business")
     detail = (proc.stderr or proc.stdout or "").strip()[:600]
     if proc.returncode != 0 and not _uses_app_identity(cmd) \
             and _looks_like_auth_error(detail) and not _AUTH_RECOVERY_ATTEMPTED:
@@ -476,7 +504,8 @@ def run_cli(cmd: list[str], timeout: int, label: str, what: str) -> str:
         if ensure_auth(cmd[0], label=label, force_refresh=True):
             proc = _invoke(cmd, timeout)
             if proc.returncode != 0:
-                _check_credential_store((proc.stderr or "") + "\n" + (proc.stdout or ""), label)
+                _check_credential_store((proc.stderr or "") + "\n" + (proc.stdout or ""), label,
+                                        stage="business_retry")
             detail = (proc.stderr or proc.stdout or "").strip()[:600]
     if proc.returncode != 0:
         sys.exit(f"[{label}] {what} 失败（退出码 {proc.returncode}）：{detail}")

@@ -170,7 +170,8 @@ class AuthRecoveryTest(unittest.TestCase):
             return replies.pop(0)
 
         with mock.patch.object(_wps_cli.subprocess, "run", side_effect=fake_run), \
-                mock.patch.object(_wps_cli, "auth_status", side_effect=list(statuses)), \
+                mock.patch.object(_wps_cli, "auth_status", return_value=None,
+                                  side_effect=([statuses[0], *statuses] if statuses else None)), \
                 mock.patch.object(_wps_cli, "_refresh_delegated", return_value=refresh) as refresh_mock, \
                 mock.patch.object(_wps_cli, "_login_delegated", return_value=login) as login_mock:
             try:
@@ -428,6 +429,76 @@ class CredentialRecoveryTest(unittest.TestCase):
         refresh.assert_not_called()
         login.assert_not_called()
 
+    def test_preflight_failure_stops_even_with_locally_valid_credentials(self):
+        for state in ("valid", "expired", "not_found"):
+            with self.subTest(state=state):
+                status = AuthRecoveryTest._status(state)
+                status["config_dir"] = "/credential-directory"
+                with mock.patch.object(_wps_cli, "auth_status", return_value=status), \
+                        mock.patch.object(_wps_cli.tempfile, "TemporaryFile",
+                                          side_effect=PermissionError("fixture denial")), \
+                        mock.patch.object(_wps_cli, "_refresh_delegated") as refresh, \
+                        mock.patch.object(_wps_cli, "_login_delegated") as login:
+                    with self.assertRaisesRegex(SystemExit, "stage=preflight"):
+                        _wps_cli.ensure_auth("cli", force_refresh=state == "valid")
+                refresh.assert_not_called()
+                login.assert_not_called()
+
+    def test_valid_fast_path_still_checks_storage_before_returning(self):
+        status = AuthRecoveryTest._status("valid")
+        status["config_dir"] = "/credential-directory"
+        with mock.patch.object(_wps_cli, "auth_status", return_value=status), \
+                mock.patch.object(_wps_cli.tempfile, "TemporaryFile",
+                                  side_effect=PermissionError("fixture denial")), \
+                mock.patch.object(_wps_cli, "_refresh_delegated") as refresh:
+            with self.assertRaisesRegex(SystemExit, "stage=preflight"):
+                _wps_cli.ensure_auth("cli")
+        refresh.assert_not_called()
+
+    def test_business_read_is_blocked_before_implicit_cli_refresh(self):
+        status = AuthRecoveryTest._status("expired")
+        status["config_dir"] = "/credential-directory"
+        with mock.patch.object(_wps_cli, "auth_status", return_value=status), \
+                mock.patch.object(_wps_cli.tempfile, "TemporaryFile",
+                                  side_effect=PermissionError("fixture denial")), \
+                mock.patch.object(_wps_cli, "_invoke") as invoke, \
+                mock.patch.object(_wps_cli, "ensure_auth") as ensure:
+            with self.assertRaisesRegex(SystemExit, "stage=preflight"):
+                _wps_cli.run_cli(["cli", "api", "get", "/x"], 30, "test", "GET /x")
+        invoke.assert_not_called()
+        ensure.assert_not_called()
+
+    def test_preflight_leaves_existing_credentials_untouched_and_no_probe_files(self):
+        with tempfile.TemporaryDirectory() as folder:
+            credential = os.path.join(folder, "credential_delegated.enc")
+            with open(credential, "wb") as stream:
+                stream.write(b"fixture encrypted credential")
+            _wps_cli._check_credential_write_access({"config_dir": folder}, "test")
+            self.assertEqual(os.listdir(folder), ["credential_delegated.enc"])
+            with open(credential, "rb") as stream:
+                self.assertEqual(stream.read(), b"fixture encrypted credential")
+
+    def test_old_cli_without_config_dir_keeps_existing_behavior(self):
+        with mock.patch.object(_wps_cli.tempfile, "TemporaryFile") as probe:
+            for status in (None, {}, {"config_dir": ""}, {"config_dir": []}):
+                _wps_cli._check_credential_write_access(status, "test")
+        probe.assert_not_called()
+
+    def test_read_only_auth_status_does_not_probe_writes(self):
+        status = AuthRecoveryTest._status("valid")
+        status["config_dir"] = "/credential-directory"
+        reply = subprocess.CompletedProcess([], 0, json.dumps(status), "")
+        with mock.patch.object(_wps_cli, "_invoke", return_value=reply), \
+                mock.patch.object(_wps_cli.tempfile, "TemporaryFile") as probe:
+            self.assertEqual(_wps_cli.auth_status("cli"), status)
+        probe.assert_not_called()
+
+    def test_post_refresh_storage_error_identifies_stage_without_raw_credentials(self):
+        reply = subprocess.CompletedProcess([], 1, "", self.BLOCKED)
+        with mock.patch.object(_wps_cli, "_invoke", return_value=reply):
+            with self.assertRaisesRegex(SystemExit, "stage=refresh"):
+                _wps_cli._refresh_delegated("cli")
+
     def test_refresh_save_failure_stops_before_login_and_hides_raw_secrets(self):
         denied = subprocess.CompletedProcess(
             [], 1, "", self.BLOCKED + " refresh_token=fixture-secret")
@@ -443,7 +514,8 @@ class CredentialRecoveryTest(unittest.TestCase):
 
     def test_business_storage_failure_does_not_enter_oauth_recovery(self):
         denied = subprocess.CompletedProcess([], 1, "", self.BLOCKED)
-        with mock.patch.object(_wps_cli, "_invoke", return_value=denied) as invoke, \
+        with mock.patch.object(_wps_cli, "auth_status", return_value=None), \
+                mock.patch.object(_wps_cli, "_invoke", return_value=denied) as invoke, \
                 mock.patch.object(_wps_cli, "ensure_auth") as ensure:
             with self.assertRaisesRegex(SystemExit, "credential_store_blocked"):
                 _wps_cli.run_cli(["cli", "api", "get", "/x"], 30, "test", "GET /x")
@@ -452,7 +524,8 @@ class CredentialRecoveryTest(unittest.TestCase):
 
     def test_successful_document_content_is_not_interpreted_as_a_storage_error(self):
         payload = json.dumps({"content": self.BLOCKED})
-        with mock.patch.object(_wps_cli, "_invoke", return_value=
+        with mock.patch.object(_wps_cli, "auth_status", return_value=None), \
+                mock.patch.object(_wps_cli, "_invoke", return_value=
                                subprocess.CompletedProcess([], 0, payload, "")):
             self.assertEqual(_wps_cli.run_cli(
                 ["cli", "api", "get", "/x"], 30, "test", "GET /x"), payload)
@@ -460,7 +533,8 @@ class CredentialRecoveryTest(unittest.TestCase):
     def test_retry_storage_failure_is_classified_without_a_second_recovery(self):
         replies = [subprocess.CompletedProcess([], 1, "", "invalid_token"),
                    subprocess.CompletedProcess([], 1, "", self.BLOCKED)]
-        with mock.patch.object(_wps_cli, "_invoke", side_effect=replies) as invoke, \
+        with mock.patch.object(_wps_cli, "auth_status", return_value=None), \
+                mock.patch.object(_wps_cli, "_invoke", side_effect=replies) as invoke, \
                 mock.patch.object(_wps_cli, "ensure_auth", return_value=True) as ensure:
             with self.assertRaisesRegex(SystemExit, "credential_store_blocked"):
                 _wps_cli.run_cli(["cli", "api", "get", "/x"], 30, "test", "GET /x")
@@ -552,7 +626,8 @@ class CredentialRecoveryTest(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix", "executable fixture uses a POSIX shebang")
     def test_auth_entrypoint_with_real_fixture_processes(self):
         for scenario in ("refresh-blocked", "login-blocked", "status-blocked",
-                         "network-failure", "invalid-grant", "success"):
+                         "network-failure", "invalid-grant", "success",
+                         "preflight-refresh-blocked", "preflight-valid-blocked"):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as tmp:
                 cli = os.path.join(tmp, "fixture cli")
                 log = os.path.join(tmp, "calls.jsonl")
@@ -566,9 +641,9 @@ with open({log!r}, 'a') as stream:
 if args[:2] == ['auth', 'status']:
     if scenario == 'status-blocked':
         sys.exit({self.BLOCKED!r})
-    print(json.dumps({{'delegated': {{
+    print(json.dumps({{'config_dir': {cli!r} if scenario.startswith('preflight-') else {tmp!r}, 'delegated': {{
         'available': True, 'has_refresh': True,
-        'status': 'valid' if os.path.exists({state!r}) else 'expired'
+        'status': 'valid' if os.path.exists({state!r}) or scenario == 'preflight-valid-blocked' else 'expired'
     }}}}))
 elif args[:2] == ['auth', 'refresh']:
     if scenario == 'refresh-blocked':
@@ -608,7 +683,7 @@ else:
                 self.assertEqual(calls.count(["auth", "login"]),
                                  int(scenario in ("login-blocked", "invalid-grant")))
                 self.assertEqual(calls.count(["auth", "refresh"]),
-                                 int(scenario != "status-blocked"))
+                                 int(scenario != "status-blocked" and not scenario.startswith("preflight-")))
 
 
 class StdoutEncodingTest(unittest.TestCase):
