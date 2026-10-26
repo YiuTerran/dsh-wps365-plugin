@@ -194,6 +194,7 @@ The package is published to npm (`publishConfig.access: public`). The release pr
 
 ## Changelog
 
+- **0.2.7** — Rewrites the DSH skill's escalation guidance for DSH's deny-then-retry sandbox model instead of Codex's `require_escalated`, and fixes the rendered-body budget test and wording so the skill stays under the 8192-character pruner limit. Shared Python scripts are unchanged. See [CHANGELOG.md](CHANGELOG.md).
 - **0.2.6** — Requires outside-sandbox permission before the first authentication or cloud call in restricted environments, retaining that approved context for later cloud calls. Adds a credential-directory write probe as a fallback, failure-stage markers, and 7 regressions. See [CHANGELOG.md](CHANGELOG.md).
 - **0.2.5** — Checks credential-storage errors only for failed business commands, preserving successful document content that happens to contain error messages. Adds a regression and reruns the full checks. See [CHANGELOG.md](CHANGELOG.md).
 - **0.2.4** — Separates credential storage denials, rejected refresh grants, and CLI/network/server failures. Storage denials stop recovery and request execution permission instead of repeating login. Device verification stays visible; adds 15 auth regressions including fixture CLI process checks. See [CHANGELOG.md](CHANGELOG.md).

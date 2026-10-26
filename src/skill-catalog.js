@@ -171,7 +171,7 @@ export function buildRuntimeHint({ skillDir, cli, cliExists, python, platform = 
     '## 本机资源（由 @tryao/dsh-wps365-plugin 注入）',
     '',
     `- \`{skillDir}\` = \`${dir}\``,
-    `- 脚本目录 = \`${scriptsDir}\`（${SKILL_SCRIPTS.join('、')}）`,
+    `- 脚本目录 = \`${scriptsDir}\``,
   ]
 
   if (python === undefined) {

@@ -47,7 +47,17 @@ test('SKILL.md parses into the advertised name and description', () => {
 
 test('rendered skill body stays inside the 8192-code-point pruner budget', () => {
   const body = parseSkillMarkdown(readFileSync(SKILL_PATH, 'utf8'), SKILL_PATH).content
-  const hint = buildRuntimeHint({ skillDir: ASSET_ROOT, cli: '/usr/local/bin/wps365-cli', cliExists: true })
+  // Model a real load, not just the two mandatory fields: the injected block
+  // also carries the platform, the temp directory, and the deferred (longest)
+  // python line. Measuring only `cli` understates the rendered body by ~150
+  // characters and is how the 0.2.6 additions nearly crossed the budget.
+  const hint = buildRuntimeHint({
+    skillDir: ASSET_ROOT,
+    cli: '/usr/local/bin/wps365-cli',
+    cliExists: true,
+    platform: 'darwin',
+    tmpDir: '/tmp/dsh-session-tmp-directory-0123456789',
+  })
   const rendered = body + hint
   assert.ok(
     [...rendered].length < 8192,

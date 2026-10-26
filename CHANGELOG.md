@@ -3,6 +3,19 @@
 本文件记录面向使用者的变更；每个版本的细节也同步写在 `README.md` 的「更新记录」一节。
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.7] - 2026-10-26
+
+### 修复
+
+- **按 DSH 的真实沙盒模型改写提权指引。** DSH 不支持 Codex 的 `sandbox_permissions="require_escalated"`。受限模式先在沙盒运行；被沙盒拒绝、`stage=preflight` 或凭据读写被拒后，对**同一条命令**带 `sandbox_permissions`（最窄更宽档，通常是 `"danger-full-access"`）和一句当前用户语言的 `justification` 重试，由审批弹窗授权。批准只覆盖该次执行；不绕过审批，也不先登录再补权限。
+- **修正 skill 渲染预算。** 0.2.6 的文案在真实注入块（含临时目录、平台与延迟解析的 Python）下达到 8348/8192；收紧文案，并让预算测试使用完整 hint，当前渲染约 8076。运行时注入块不再重复列出脚本名，脚本清单仍由 SKILL.md 的命令与「本机资源」说明提供。
+- Codex 插件两份 manifest 随版本号更新到 0.2.7，技能内容与 0.2.6 相同；账号插件（ChatGPT 侧）需单独在插件页更新，本次未操作。
+
+### 验证
+
+- `node --test` 47 项（1 项因缺少 DSH 宿主的 YAML 解析器跳过）、82 项脚本回归、48 项多维表回归全部通过；Codex 构建与共享段落校验、`npm run check:pack` 通过。
+- 未改共享 Python 脚本；0.2.6 的凭据目录可写探测与 `stage=*` 标记保持不变。
+
 ## [0.2.6] - 2026-10-26
 
 ### 修复

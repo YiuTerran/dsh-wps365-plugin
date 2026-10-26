@@ -5,25 +5,25 @@ description: 读取或写入 WPS 365 云文档。智能文档（.otl / airpage�
 
 # 读取与写入 WPS 365 云文档
 
-`{skillDir}`、`{python}`、`{cli}`、`{tmp}` 四个占位符都由插件在文末「本机资源」一节注入真实值（资源目录、Python 解释器、wps365-cli 路径、临时目录）；执行命令前先看那一节，把占位符替换掉再跑。
+文末「本机资源」一节注入 `{skillDir}`、`{python}`、`{cli}`、`{tmp}` 的真实值；执行命令前先看那一节并替换占位符。
 
-命令一律写成**单行**、路径含空格用双引号包住，**不要用 `&&` 或管道串联** —— 这样 macOS / Linux 的 bash 与 Windows 的 PowerShell / cmd 都能直接执行（那一节还会告诉你本机是哪个平台）。
+命令一律写成**单行**；路径含空格用双引号包住；**不要用 `&&` 或管道串联**，这样 bash / PowerShell / cmd 都能直接执行（平台见本机资源）。
 
 ## 授权：2 小时 token 会自动续期
 
-- `wps365-cli` 的 access token 只有 2 小时，但 CLI 会在过期前 10 秒自动刷新，并在 401 时透明重试。用户 refresh token 标称有效期 **365 天**，刷新会轮换；这不保证一年内一定不用重新登录，撤销、凭据保存失败等仍可能提前失效。不要把频繁重登当成正常的两小时续期。
+- `wps365-cli` 的 access token 只有 2 小时，但 CLI 会在过期前 10 秒自动刷新，并在 401 时透明重试。refresh token 标称 **365 天**，刷新会轮换；撤销或保存失败仍可能提前失效，频繁重登不是正常的续期。
 - 只有 refresh token 过期/被撤销、keyring 中的 token 丢失，或 CLI 回退到 app 身份后报 `required delegated scopes`，才需要重新登录。
-- 刚完成设备码登录时，CLI 可能把 `refresh_token_expires_at` 返回为 `0001-01-01`（Go 零值，表示响应未带有效期），**这不是过期**；`auth.py status` 会显示“未知”，恢复逻辑也不会因此刷新或重登。
-- 本目录脚本的 `run_cli` 已内置恢复：遇到上述授权错误先运行 `auth refresh --delegated`，refresh token 被拒绝或缺失时自动运行 `auth login --device`（用户在浏览器确认授权），恢复成功后重试一次。存储权限、网络或服务端异常会停止并提示原因。直接运行 CLI 不会经过这层封装。
-- **首次调用就申请权限**：受限沙盒中，认证或云端 CLI/脚本（含 `ensure`、refresh、登录、分享链接、读取）首次调用就须申请沙盒外执行，不能等浏览器授权后才提权。支持时设置 `sandbox_permissions="require_escalated"`，说明需读写 WPS 凭据；后续云端调用保持相同获准权限，读取也可能刷新并保存。提权不可用或被拒绝时，启动登录前停止，提示本机终端执行；不绕过审批。资源定位、本地处理、只读 `auth.py status` 可留在沙盒内；脚本不能自行提权。
-- **硬性前置步骤**：取得所需执行权限后，首次云端 CLI 或文档脚本调用前（含分享链接），执行 `"{python}" "{skillDir}/scripts/auth.py" ensure --cli "{cli}"`，成功后再发业务请求。用户明确要求 app 身份操作时保留该身份，不执行用户授权恢复。
+- 设备码登录后 `refresh_token_expires_at` 可能是 `0001-01-01`（Go 零值，响应未带有效期），**不是过期**；`auth.py status` 显示“未知”，不会触发刷新或重登。
+- 本目录脚本的 `run_cli` 已内置恢复：授权错误先 `auth refresh --delegated`，refresh token 被拒/缺失时 `auth login --device`（浏览器确认），成功后重试一次；存储、网络或服务端异常会停止并说明原因。直接跑 CLI 不经过这层封装。
+- **权限：被拒后对同一命令升权**：DSH 不预授权。认证/云端调用（含 `ensure`、refresh、登录、分享链接、读取）先在当前沙盒运行；`ensure` 会在任何刷新前用 `stage=preflight` 探测凭据目录，失败是安全的。出现 `[sandbox: file access denied ...]`、`stage=preflight` 或凭据读写被拒时，对**同一条命令**重试一次，带 `sandbox_permissions`（最窄的更宽档；DSH 通常只有 `"danger-full-access"` 能覆盖凭据目录）和一句当前用户语言的 `justification`（说明要读写 WPS 凭据），由审批弹窗征得同意；不要绕过审批，也不要先登录再补权限。批准只覆盖该次执行，后续调用仍按会话权限运行。提权不可用或被拒时停止，提示需在本机终端认证；脚本不能自行提权。
+- **硬性前置步骤**：首次云端 CLI 或文档脚本调用前（含分享链接），执行 `"{python}" "{skillDir}/scripts/auth.py" ensure --cli "{cli}"`，成功后再发业务请求；它因凭据权限失败时按上一条升权后重跑。用户明确要求 app 身份操作时保留该身份，不执行用户授权恢复。
 - 直接调用遇到 token 失效、`required delegated scopes`，或 `delegated token unavailable, using app identity`（即使随后是 `403 invalid_scope`），执行 `"{python}" "{skillDir}/scripts/auth.py" ensure --force-refresh --cli "{cli}"`，成功后重试原命令一次。只有 `403 invalid_scope`、且确认正在使用用户身份时，可能是真正的 scope 限制，不反复刷新或登录。
 - `status` / `status --json` **只检查、不刷新**；`has_refresh: true` 只说明存有 refresh token，不代表刷新成功。恢复未尝试时，不要停在状态说明、转浏览器或断言用户没有权限。
-- **区分认证与凭据存储错误**：`credential_store_blocked` 或 `keyring.key` / 保存 token 时的 `operation not permitted`、`permission denied` 表示本地凭据读写被拒绝；脚本会停止，不能当成 token 过期而在相同权限下反复登录。申请沙盒外执行权限后重跑认证恢复命令，再读回 `auth status`；宿主不支持提权时，说明需要在本机终端完成认证。插件本身不能扩大沙盒权限，也不要自动修改全局权限配置。服务端 refresh token 可能已轮换但本地保存失败；恢复权限后若报 `invalid_grant`，重新登录获取并保存新凭据。
-- **可写探测仅作兜底**：`ensure` 和脚本业务入口用临时空文件检查 CLI 返回的 `config_dir`，不改凭据。`stage=preflight` 表示请求发出前已停止；该检查不能替代首次调用前的权限申请，也不保证系统钥匙串可写。缺少 `config_dir` 的旧 CLI 保留原行为，`stage=status/refresh/login/business` 帮助区分实际失败阶段，不能仅凭一个分类断言根因。
-- `refresh_grant_rejected` 表示服务端拒绝/找不到 refresh token，即使本地记录仍在一年有效期内，也要重新登录。`auth_refresh_failed` 表示网络、CLI 启动/超时、服务端或响应格式异常，不能据此判断 token 过期；先解决对应错误并重试，不自动发起设备码登录。诊断不得输出 access token / refresh token。
-- 不要自行设置 `WPS365_NO_AUTO_LOGIN=1` / `WPS365_AUTO_LOGIN=0`。若用户或环境已配置，应遵守：这只禁用设备码登录弹窗，**不禁用 refresh**；仍须先刷新，失败后再说明需要用户登录。报告时区分“已尝试刷新”“刷新后验证成功”“原请求已重试”。
-- 不要把 `WPS365_ACCESS_TOKEN` 写进环境变量：它会跳过 token 存储和自动刷新，2 小时后必然失效。也没有比 refresh token 更长的用户授权；`WPS365_AUTH=app` 的 client_credentials 适合无人值守，但不能替代用户态文档权限。
+- **区分认证与凭据存储错误**：`credential_store_blocked` 或 `keyring.key` / 保存 token 时的 `operation not permitted`、`permission denied` 表示本地凭据读写被拒绝；脚本会停止，不能当成 token 过期而在相同权限下反复登录。按上面的升权方式重跑并读回 `auth status`；宿主不能提权时说明需在本机终端认证，也不要自动修改全局权限。服务端 refresh token 可能已轮换但本地保存失败；恢复权限后若报 `invalid_grant`，重新登录获取并保存新凭据。
+- **可写探测仅作兜底**：`ensure` 和脚本业务入口用临时空文件检查 CLI 返回的 `config_dir`，不改凭据。`stage=preflight` 表示请求发出前已停止；该探测不能代替审批，也不保证系统钥匙串可写。缺少 `config_dir` 的旧 CLI 保留原行为（探测跳过，保存失败按上一条处理），`stage=status/refresh/login/business` 帮助区分实际失败阶段，不能仅凭一个分类断言根因。
+- `refresh_grant_rejected`：服务端拒绝/找不到 refresh token，即使本地记录未过期也要重新登录。`auth_refresh_failed`：网络、CLI 启动/超时、服务端或响应格式异常，不能据此断言 token 过期；先解决错误并重试，不自动登录。诊断不得输出 token。
+- 不要自行设置 `WPS365_NO_AUTO_LOGIN=1` / `WPS365_AUTO_LOGIN=0`；用户已配置就遵守：它只禁用登录弹窗，**不禁用 refresh**。报告时区分“已尝试刷新”“刷新后验证成功”“原请求已重试”。
+- 不要把 `WPS365_ACCESS_TOKEN` 写进环境变量：它跳过存储和自动刷新，2 小时后必然失效。`WPS365_AUTH=app` 的 client_credentials 适合无人值守，但不能替代用户态文档权限。
 
 本文件只放**必须立刻知道**的规则与命令骨架，细节按需读 `{skillDir}/references/`：
 
@@ -48,7 +48,7 @@ description: 读取或写入 WPS 365 云文档。智能文档（.otl / airpage�
 
 ## ⚠️ 写入前必须比对：文件是否已被他人修改
 
-**硬性前置步骤，不是可选优化。** 云文档是多人协作的，从你读到内容到写回之间别人可能已经改过。**发现被改过就放弃更新、并告知用户存在冲突**，由用户决定合并还是覆盖 —— 绝不静默覆盖别人的改动。原理与实测数据见 `references/concurrency.md`。
+**硬性前置步骤，不是可选优化。** 多人协作下，读与写之间可能已被他人改动。**发现被改过就放弃更新、并告知用户存在冲突**，由用户决定合并还是覆盖 —— 绝不静默覆盖别人的改动。原理与实测数据见 `references/concurrency.md`。
 
 | 类型 | 比对方式 | 怎么做 |
 |---|---|---|
