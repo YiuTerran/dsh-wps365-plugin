@@ -118,6 +118,14 @@ plugin_manager { action: "remove_bundle", target: "@tryao/dsh-wps365-plugin" }
 
 > ⚠️ Use **0.1.1 or newer**. 0.1.0 has a severe bug that stops Harness from opening; it was never published to npm. See [CHANGELOG.md](CHANGELOG.md).
 
+## Use with other agents
+
+The portable skill is in [`general-skill/wps365-docs/`](general-skill/wps365-docs/SKILL.md). Copy the entire `wps365-docs` directory into your agent's supported skill location and load `SKILL.md` using that agent's conventions. Agents without skill discovery can read the entrypoint directly. Keep the accompanying `scripts/` and `references/`; the entrypoint alone is not a complete installation.
+
+This version requires no Codex/DSH plugin, MCP tool, injected runtime, or host-specific permission flag. It uses local Python 3.10+, your own installed and authorized `wps365-cli`, and Office libraries appropriate to the task. A WPS 365 enterprise account is still required. Authentication and command approvals follow the target agent's own policy.
+
+No build is needed. After changing canonical Python helpers, run `node scripts/sync-general-skill.mjs` to update the portable copies, or add `--check` to verify parity without writing. The portable skill omits `xlsx_edit.py`, whose recalculation discovery depends on a particular application runtime; use available local Office tooling instead. Existing npm and Codex installation paths are unchanged.
+
 ## Config (optional)
 
 The row id is `skill-wps365-docs`. All three fields have defaults, so **no config is required**:

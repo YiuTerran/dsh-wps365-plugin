@@ -168,8 +168,8 @@ def xlsx_read_local(path: str, out_dir: str, max_rows: int, max_cols: int,
         from openpyxl import load_workbook
         from openpyxl.utils import get_column_letter
     except ImportError:
-        sys.exit("[file_fetch] 本地解析 .xlsx 需要 openpyxl。请用工作区自带的 Python 运行"
-                 "（load_workspace_dependencies 给出的可执行文件），或加 --via-api 改走 sheets 接口。")
+        sys.exit("[file_fetch] 本地解析 .xlsx 需要 openpyxl。请用已安装 openpyxl 的 Python 运行，"
+                 "或加 --via-api 改走 sheets 接口（无法保留公式原文）。")
 
     wb = load_workbook(path, data_only=False)      # 公式原文
     wbv = load_workbook(path, data_only=True)      # 缓存计算值

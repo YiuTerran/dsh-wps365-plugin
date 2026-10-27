@@ -151,6 +151,14 @@ wps365-cli auth login --device
 
 Codex 使用本地执行环境运行 Python 脚本和 `wps365-cli`。处理 `.xlsx` 需要 `openpyxl`，用 `python-docx` 创建或处理 DOCX 需要 `python-docx`；有 Codex 提供的 `load_workspace_dependencies` 时可使用其中的 Python，否则本机需有相应 Python 依赖。Excel 编辑和公式重算使用当前可用的 Office 技能能力；Codex 版本不依赖 DSH 附带的 LibreOffice Kit。
 
+## 在其他 Agent 中使用
+
+通用技能位于 [`general-skill/wps365-docs/`](general-skill/wps365-docs/SKILL.md)。将整个 `wps365-docs` 目录复制到目标 Agent 支持的技能目录，再按该 Agent 的方式加载 `SKILL.md`。不支持技能自动发现的 Agent，也可直接读取该文件。请保留随附的 `scripts/` 和 `references/`，不要只复制入口文件。
+
+这个版本不依赖 Codex/DSH 的插件、MCP 工具、运行时注入或提权参数；使用本机 Python 3.10+、自己安装并授权的 `wps365-cli`，以及按任务需要准备的 Office 处理库。仍然仅支持 WPS 365 企业版账号。认证与命令执行权限遵循目标 Agent 自身的审批机制。
+
+该目录可直接使用，无需构建。维护共享 Python 脚本后，运行 `node scripts/sync-general-skill.mjs` 同步通用副本，或加 `--check` 只检查一致性。通用版不携带依赖特定应用运行时探测的 `xlsx_edit.py`；Office 编辑和重算使用目标环境已有能力。现有 npm 包和 Codex 构建的安装方式不变。
+
 ## 配置（可选）
 
 插件行的 id 是 `skill-wps365-docs`，三个字段都有默认值，**不配也能用**：
