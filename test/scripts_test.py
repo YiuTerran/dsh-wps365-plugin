@@ -40,6 +40,7 @@ import _wps_cli  # noqa: E402
 import auth as wps_auth  # noqa: E402
 import file_fetch  # noqa: E402
 import otl_fetch  # noqa: E402
+import otl_sync  # noqa: E402
 import otl_write  # noqa: E402
 import xlsx_edit  # noqa: E402
 
@@ -703,7 +704,7 @@ class StdoutEncodingTest(unittest.TestCase):
 
     def test_every_entry_script_bootstraps_the_stdio(self):
         missing = []
-        for name in ("otl_fetch.py", "otl_write.py", "file_fetch.py",
+        for name in ("otl_fetch.py", "otl_write.py", "otl_sync.py", "file_fetch.py",
                      "file_write.py", "xlsx_edit.py"):
             with open(os.path.join(SCRIPTS, name), encoding="utf-8") as fh:
                 if "use_utf8_stdio" not in fh.read():
@@ -997,6 +998,600 @@ class XlsxReadbackTest(unittest.TestCase):
         problems = self._adopted([sheets, {"range_data": []}], [("数据", "B2", "42")])
         self.assertEqual(len(problems), 1)
         self.assertIn("云端读回 None", problems[0])
+
+
+
+
+class OtlImagePlanTest(unittest.TestCase):
+    """Markdown 里的图片必须按出现顺序配对到 convert 出的 picture 块。"""
+
+    def test_collects_both_syntaxes_in_document_order(self):
+        md = ('前文 <img src="a.png" width="86%"> 后文\n'
+              '![说明](img/b.png)\n'
+              '<img src="https://example.com/c.png">\n')
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "img"))
+            for rel in ("a.png", os.path.join("img", "b.png")):
+                open(os.path.join(tmp, rel), "wb").close()
+            plan = otl_write.image_plan(md, tmp)
+        self.assertEqual([item["src"] for item in plan], ["a.png", "img/b.png",
+                                                          "https://example.com/c.png"])
+        self.assertEqual([item["local"] for item in plan], [True, True, False])
+
+    def test_a_missing_local_file_is_reported_as_not_local(self):
+        plan = otl_write.image_plan('<img src="gone.png">', "/nonexistent-dir")
+        self.assertFalse(plan[0]["local"])
+        self.assertTrue(plan[0]["path"].endswith("gone.png"))
+
+    def test_remote_urls_never_touch_the_filesystem(self):
+        plan = otl_write.image_plan("![x](https://cdn.example.com/y.png?sign=1)", ".")
+        self.assertEqual(plan[0]["path"], None)
+        self.assertFalse(plan[0]["local"])
+
+
+class OtlFillPicturesTest(unittest.TestCase):
+    """空 id 的 picture 块写进去会被 400 拒，所以必须回填附件 id 与真实尺寸。"""
+
+    def _blocks(self, count=1):
+        return [{"picture": {"attributes": {"id": "", "width": 300, "height": 300},
+                             "range_marks": []}} for _ in range(count)]
+
+    def test_fills_id_and_real_size_and_caps_render_width(self):
+        blocks = self._blocks()
+        plan = [{"src": "a.png", "path": "/tmp/a.png", "local": True,
+                 "id": "ABCDEFGHIJKLM", "width": 1058, "height": 367}]
+        with contextlib.redirect_stdout(io.StringIO()):
+            filled = otl_write.fill_pictures(blocks, plan, 86, 740)
+        attrs = blocks[0]["picture"]["attributes"]
+        self.assertEqual(filled, 1)
+        self.assertEqual(attrs["id"], "ABCDEFGHIJKLM")
+        self.assertEqual((attrs["width"], attrs["height"]), (1058, 367))
+        self.assertEqual(attrs["render_width"], 636)   # 86% × 740
+        self.assertEqual(attrs["align"], "center")
+
+    def test_a_narrow_image_keeps_its_original_width(self):
+        blocks = self._blocks()
+        plan = [{"src": "a.png", "path": "/tmp/a.png", "local": True,
+                 "id": "ID", "width": 508, "height": 422}]
+        with contextlib.redirect_stdout(io.StringIO()):
+            otl_write.fill_pictures(blocks, plan, 86, 740)
+        self.assertEqual(blocks[0]["picture"]["attributes"]["render_width"], 508)
+
+    def test_a_remote_image_becomes_a_placeholder_paragraph(self):
+        blocks = self._blocks()
+        plan = [{"src": "https://example.com/a.png", "path": None, "local": False}]
+        with contextlib.redirect_stdout(io.StringIO()):
+            otl_write.fill_pictures(blocks, plan, 86, 740)
+        paragraph = blocks[0]["paragraph"]
+        self.assertIn("https://example.com/a.png",
+                      paragraph["elements"][0]["text"]["attributes"]["content"])
+
+    def test_a_mismatch_aborts_instead_of_writing_blank_ids(self):
+        with self.assertRaises(SystemExit) as caught:
+            otl_write.fill_pictures(self._blocks(2),
+                                    [{"src": "a.png", "path": "/tmp/a.png", "local": True,
+                                      "id": "ID", "width": 10, "height": 10}], 86, 740)
+        self.assertIn("顺序配对不成立", str(caught.exception))
+
+
+class OtlWideTableTest(unittest.TestCase):
+    """服务端 table.rows 是 maxItems=100，超了写入 400。"""
+
+    def _table(self, rows):
+        head = {"cells": [{"attributes": {"colspan": 1, "rowspan": 1},
+                           "block_id": "head-cell",
+                           "children": [{"paragraph": {"elements": []}}]}]}
+        body = [{"cells": [{"attributes": {"colspan": 1, "rowspan": 1},
+                            "block_id": f"cell-{i}",
+                            "children": [{"paragraph": {"elements": []}}]}]}
+                for i in range(rows)]
+        return {"table": {"attributes": {"border_type": "solid", "grid": [740]},
+                          "range_marks": [], "rows": [head] + body}}
+
+    def test_a_short_table_is_left_alone(self):
+        blocks = [self._table(40)]
+        out, split = otl_write.split_wide_tables(blocks)
+        self.assertEqual(split, 0)
+        self.assertEqual(len(out), 1)
+
+    def test_a_long_table_is_split_into_capped_pieces_with_repeated_header(self):
+        out, split = otl_write.split_wide_tables([self._table(429)])
+        self.assertEqual(len(out), 5)          # 429 数据行 = 4×99 + 33
+        self.assertEqual(split, 4)             # 净增 4 张
+        header = json.loads(json.dumps(self._table(0)["table"]["rows"][0]))
+        otl_write._strip_block_ids(header)
+        for piece in out:
+            rows = piece["table"]["rows"]
+            self.assertLessEqual(len(rows), otl_write.MAX_TABLE_ROWS)
+            self.assertEqual(rows[0], header, "表头必须重复")
+
+    def test_split_copies_do_not_reuse_block_ids(self):
+        out, _ = otl_write.split_wide_tables([self._table(200)])
+        blob = json.dumps(out, ensure_ascii=False)
+        self.assertNotIn("head-cell", blob)
+        self.assertNotIn("cell-0", blob)
+
+
+class OtlPayloadTransportTest(unittest.TestCase):
+    """千块级写入的 JSON 塞进 argv 会 E2BIG，必须改走 --file。"""
+
+    def _run(self, payload):
+        seen = {}
+
+        def fake_run_cli(cmd, timeout, label, what):
+            seen["cmd"] = cmd
+            for index, part in enumerate(cmd):
+                if part == "--file":
+                    with open(cmd[index + 1], encoding="utf-8") as fh:
+                        seen["body"] = json.load(fh)
+                    os.unlink(cmd[index + 1])
+            return json.dumps({"code": 0, "data": {"ok": True}})
+
+        with mock.patch.object(otl_write, "_run_cli", side_effect=fake_run_cli):
+            otl_write.api("/cli", "post", "/v7/x", payload, 30)
+        return seen
+
+    def test_a_small_body_stays_on_the_command_line(self):
+        seen = self._run({"a": 1})
+        self.assertIn("--data", seen["cmd"])
+        self.assertNotIn("--file", seen["cmd"])
+
+    def test_a_large_body_goes_through_a_file(self):
+        seen = self._run({"blob": "中" * (otl_write.INLINE_BODY_LIMIT)})
+        self.assertIn("--file", seen["cmd"])
+        self.assertNotIn("--data", seen["cmd"])
+        self.assertEqual(len(seen["body"]["blob"]), otl_write.INLINE_BODY_LIMIT)
+
+    def test_query_parameters_are_passed_separately_from_the_path(self):
+        seen = self._run(None)
+        self.assertIn("/v7/x", seen["cmd"])
+        self.assertNotIn("--query", seen["cmd"])
+
+        seen = {}
+        with mock.patch.object(otl_write, "_run_cli",
+                               side_effect=lambda cmd, timeout, label, what:
+                               (seen.setdefault("cmd", cmd), json.dumps({"code": 0}))[1]):
+            otl_write.api("/cli", "get", "/v7/x", None, 30, query={"page_size": "100"})
+        self.assertIn("page_size=100", seen["cmd"])
+
+
+class OtlSyncHelpersTest(unittest.TestCase):
+    """批量同步脚本：front matter 摘除与文件名安全化。"""
+
+    def test_front_matter_is_replaced_by_metadata(self):
+        md = "---\ntitle: T\nsource: s.pdf\npages: 84\nconverted: 2026-11-01\n---\n\n# 前言\n"
+        body, meta = otl_write.strip_front_matter(md)
+        self.assertTrue(body.startswith("# 前言"))
+        quote = otl_sync.meta_blockquote(meta)
+        self.assertIn("来源文件：s.pdf", quote)
+        self.assertIn("页数：84", quote)
+        self.assertTrue(quote.endswith("\n\n"))
+
+    def test_markdown_without_front_matter_is_untouched(self):
+        body, meta = otl_write.strip_front_matter("# 标题\n")
+        self.assertEqual(body, "# 标题\n")
+        self.assertEqual(meta, {})
+
+    def test_names_drop_path_separators(self):
+        self.assertEqual(otl_sync.safe_name("SL651/水文：规约?"), "SL651-水文：规约")
+
+    def test_a_blank_paragraph_is_recognised(self):
+        self.assertTrue(otl_write.is_blank_paragraph(
+            {"paragraph": {"attributes": {}, "elements": [], "range_marks": []}}))
+        self.assertFalse(otl_write.is_blank_paragraph(
+            {"paragraph": {"elements": [{"text": {"attributes": {"content": "x"}}}]}}))
+        self.assertFalse(otl_write.is_blank_paragraph({"heading": {"elements": []}}))
+
+
+
+
+class OtlTitleTest(unittest.TestCase):
+    """新建智能文档的标题块是空的，只写正文会一直留着「输入标题」占位。"""
+
+    def test_explicit_text_wins(self):
+        self.assertEqual(
+            otl_write.resolve_title("我的标题", "meta.pdf", "/tmp/文件.md"), "我的标题")
+
+    def test_front_matter_title_is_used_by_auto(self):
+        self.assertEqual(
+            otl_write.resolve_title("auto", "SL651-水文监测数据通信规约", "/tmp/x.md"),
+            "SL651-水文监测数据通信规约")
+
+    def test_md_stem_is_the_last_resort(self):
+        self.assertEqual(otl_write.resolve_title("auto", None, "/tmp/规范 文档.md"), "规范 文档")
+
+    def test_none_disables_the_title(self):
+        self.assertEqual(otl_write.resolve_title("none", "有标题", "/tmp/x.md"), "")
+
+    def test_auto_without_any_source_yields_nothing(self):
+        self.assertEqual(otl_write.resolve_title("auto", None, None), "")
+
+    def test_doc_title_reads_the_title_block(self):
+        def fake_api(cli, method, path, data, timeout, query=None):
+            return {"block": {"doc": {"title": {"block_id": "title", "elements": [
+                {"text": {"attributes": {"content": "标准 A"}}},
+                {"text": {"attributes": {"content": "-2021"}}}]}}}}
+
+        with mock.patch.object(otl_write, "api", side_effect=fake_api):
+            self.assertEqual(otl_write.doc_title("/cli", "fid", 5), "标准 A-2021")
+
+    def _ensure(self, current, title, overwrite=False):
+        written = []
+        with mock.patch.object(otl_write, "doc_title", return_value=current), \
+                mock.patch.object(otl_write, "set_title",
+                                  side_effect=lambda cli, fid, text, timeout: written.append(text)):
+            action = otl_write.ensure_title("/cli", "fid", title, 5, overwrite=overwrite)
+        return action, written
+
+    def test_an_empty_title_is_filled(self):
+        action, written = self._ensure("", "标准 A")
+        self.assertEqual((action, written), ("set", ["标准 A"]))
+
+    def test_an_existing_title_is_not_clobbered(self):
+        action, written = self._ensure("别人写的标题", "标准 A")
+        self.assertEqual((action, written), ("kept", []))
+
+    def test_the_same_title_needs_no_write(self):
+        action, written = self._ensure("标准 A", "标准 A")
+        self.assertEqual((action, written), ("unchanged", []))
+
+    def test_retitle_overwrites_on_request(self):
+        action, written = self._ensure("旧标题", "标准 A", overwrite=True)
+        self.assertEqual((action, written), ("set", ["标准 A"]))
+
+    def test_an_empty_candidate_never_clears_a_title(self):
+        action, written = self._ensure("旧标题", "")
+        self.assertEqual((action, written), ("unchanged", []))
+
+
+class OtlServiceTestCase(unittest.TestCase):
+    """Exercise the actual entrypoints against a stateful, local block service."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.children = [self.paragraph("old", "old-id")]
+        self.converted = [self.paragraph("new")]
+        self.events = []
+        self.fail_convert = False
+        self.fail_create = None
+        self.drop_create = False
+        self.create_count = 0
+        self.commit_then_timeout = False
+        self.after_convert = None
+        self.addCleanup(mock.patch.stopall)
+        mock.patch.object(otl_write, "api", side_effect=self.api).start()
+        mock.patch.object(otl_sync, "api", side_effect=self.api).start()
+        mock.patch.object(otl_write, "ensure_title", return_value="unchanged").start()
+        mock.patch.object(otl_sync, "ensure_title", return_value="unchanged").start()
+        original_tempfile = tempfile.NamedTemporaryFile
+
+        def local_tempfile(*args, **kwargs):
+            kwargs.setdefault("dir", self.tmp.name)
+            return original_tempfile(*args, **kwargs)
+
+        mock.patch.object(tempfile, "NamedTemporaryFile", side_effect=local_tempfile).start()
+
+    @staticmethod
+    def paragraph(text, block_id=None):
+        inner = {"elements": [{"text": {"attributes": {"content": text}}}]} if text else {"elements": []}
+        if block_id:
+            inner["block_id"] = block_id
+        return {"paragraph": inner}
+
+    def api(self, cli, method, path, data, timeout, query=None):
+        self.events.append(path.rsplit("/", 1)[-1])
+        if path.endswith("/convert"):
+            if self.fail_convert:
+                raise SystemExit("conversion failed")
+            if self.after_convert:
+                self.after_convert()
+            return {"blocks": json.loads(json.dumps(self.converted))}
+        if path.endswith("/blocks"):
+            return {"block": {"doc": {"children": json.loads(json.dumps(self.children))}}}
+        if path.endswith("/delete"):
+            del self.children[data["start_index"]:data["end_index"]]
+            return {}
+        if path.endswith("/create"):
+            self.create_count += 1
+            if self.create_count == self.fail_create:
+                raise RuntimeError("interrupted")
+            if not self.drop_create:
+                children = json.loads(json.dumps(data["doc_children"]["children"]))
+                for index, block in enumerate(children):
+                    next(iter(block.values()))["block_id"] = f"new-{self.create_count}-{index}"
+                self.children[data["index"]:data["index"]] = children
+            if self.commit_then_timeout:
+                raise RuntimeError("response timed out after commit")
+            return {}
+        raise AssertionError(f"Unexpected cloud request: {path}")
+
+    def run_write(self, *args):
+        argv = ["otl_write.py", "--file-id", "fid", "--cli", "/cli",
+                "--text", "# new", "--title", "none", *args]
+        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()):
+            otl_write.main()
+
+
+class OtlWriteSafetyTest(OtlServiceTestCase):
+    def test_all_dry_run_modes_leave_empty_and_existing_documents_unchanged(self):
+        for mode in ("append", "prepend", "replace"):
+            for body in ([self.paragraph("")], [self.paragraph("old", "old-id")]):
+                with self.subTest(mode=mode, body=body):
+                    self.children = json.loads(json.dumps(body))
+                    self.events.clear()
+                    self.run_write("--mode", mode, "--dry-run")
+                    self.assertEqual(self.children, body)
+                    self.assertNotIn("delete", self.events)
+                    self.assertNotIn("create", self.events)
+
+    def test_failed_conversion_keeps_old_body(self):
+        self.fail_convert = True
+        with self.assertRaises(SystemExit):
+            self.run_write("--mode", "replace")
+        self.assertEqual(self.children, [self.paragraph("old", "old-id")])
+        self.assertNotIn("delete", self.events)
+
+    def test_picture_count_mismatch_keeps_old_body_and_uploads_nothing(self):
+        self.converted = [{"picture": {"attributes": {"id": ""}}}]
+        with mock.patch.object(otl_write, "upload_attachment") as upload:
+            with self.assertRaises(SystemExit):
+                self.run_write("--mode", "replace")
+            upload.assert_not_called()
+        self.assertNotIn("delete", self.events)
+
+    def test_invalid_local_image_keeps_old_body(self):
+        path = os.path.join(self.tmp.name, "image.png")
+        with open(path, "wb") as fh:
+            fh.write(b"not an image")
+        self.converted = [{"picture": {"attributes": {"id": ""}}}]
+        with mock.patch.object(otl_write, "image_size", side_effect=ValueError("broken image")):
+            with self.assertRaises(ValueError):
+                with mock.patch.object(sys, "argv", ["otl_write.py", "--file-id", "fid",
+                                                     "--text", f"![]({path})", "--mode", "replace"]), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    otl_write.main()
+        self.assertNotIn("delete", self.events)
+
+    def test_conversion_and_validation_precede_delete_and_keep_backup(self):
+        self.run_write("--mode", "replace")
+        self.assertLess(self.events.index("convert"), self.events.index("delete"))
+        backups = [name for name in os.listdir(self.tmp.name) if name.startswith("otl-backup-")]
+        self.assertEqual(len(backups), 1)
+        with open(os.path.join(self.tmp.name, backups[0]), encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["children"], [self.paragraph("old", "old-id")])
+
+    def test_concurrent_change_during_preparation_stops_replace(self):
+        self.after_convert = lambda: self.children.append(self.paragraph("someone else's edit", "other"))
+        with self.assertRaises(SystemExit):
+            self.run_write("--mode", "replace")
+        self.assertNotIn("delete", self.events)
+        self.assertEqual(len(self.children), 2)
+
+    def test_missing_prepend_and_append_batches_are_failures(self):
+        for mode in ("prepend", "append"):
+            with self.subTest(mode=mode):
+                self.children = [self.paragraph(f"old-{i}", str(i)) for i in range(100)]
+                self.drop_create = True
+                with self.assertRaises(SystemExit):
+                    self.run_write("--mode", mode)
+                self.assertEqual(len(self.children), 100)
+
+    def test_prepend_success_preserves_original_body(self):
+        self.run_write("--mode", "prepend")
+        self.assertEqual(len(self.children), 2)
+        self.assertEqual(self.children[1], self.paragraph("old", "old-id"))
+
+    def test_blank_document_can_be_written_in_each_mode(self):
+        for mode in ("append", "prepend", "replace"):
+            with self.subTest(mode=mode):
+                self.children = [self.paragraph("")]
+                self.run_write("--mode", mode)
+                self.assertEqual(len(self.children), 1)
+                self.assertEqual(self.children[0]["paragraph"]["elements"][0]["text"]["attributes"]["content"], "new")
+
+    def test_previews_cannot_be_committed_even_via_helper_api(self):
+        prepared = {"file_id": "fid", "dry_run": True}
+        with self.assertRaises(ValueError):
+            otl_write.commit_document("cli", "fid", prepared, mode="replace", baseline=self.children)
+        with self.assertRaises(ValueError):
+            otl_write.write_prepared("cli", "fid", prepared)
+        self.assertEqual(self.events, [])
+
+    def test_upload_failure_keeps_existing_body(self):
+        path = os.path.join(self.tmp.name, "a.png")
+        with open(path, "wb") as fh:
+            fh.write(b"image bytes")
+        self.converted = [{"picture": {"attributes": {"id": ""}}}]
+        with mock.patch.object(otl_write, "image_size", return_value=(10, 20)), \
+                mock.patch.object(otl_write, "upload_attachment", side_effect=RuntimeError("upload failed")), \
+                mock.patch.object(sys, "argv", ["otl_write.py", "--file-id", "fid", "--text", f"![]({path})", "--mode", "replace"]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(RuntimeError):
+                otl_write.main()
+        self.assertNotIn("delete", self.events)
+        self.assertEqual(self.children, [self.paragraph("old", "old-id")])
+
+    def test_dry_run_checks_picture_pairing_and_does_not_upload(self):
+        path = os.path.join(self.tmp.name, "a.png")
+        with open(path, "wb") as fh:
+            fh.write(b"image")
+        self.converted = [{"picture": {"attributes": {"id": ""}}}]
+        with mock.patch.object(otl_write, "image_size", return_value=(10, 20)), \
+                mock.patch.object(otl_write, "upload_attachment") as upload:
+            otl_write.prepare_markdown("cli", "fid", "![](a.png)", base=self.tmp.name,
+                                       dry_run=True, progress=lambda *args: None)
+            upload.assert_not_called()
+        self.assertNotIn("delete", self.events)
+        self.assertNotIn("create", self.events)
+
+    def test_image_cache_requires_current_content_and_document(self):
+        path = os.path.join(self.tmp.name, "a.png")
+        with open(path, "wb") as fh:
+            fh.write(b"first image")
+        cache = {}
+        self.converted = [{"picture": {"attributes": {"id": ""}}}]
+        with mock.patch.object(otl_write, "image_size", return_value=(10, 20)), \
+                mock.patch.object(otl_write, "upload_attachment", side_effect=["one", "two", "three"]) as upload:
+            def prepare(fid="fid"):
+                return otl_write.prepare_markdown("cli", fid, "![](a.png)", base=self.tmp.name,
+                                                  image_cache=cache, progress=lambda *args: None)
+            first = prepare()
+            second = prepare()
+            self.assertEqual(upload.call_count, 1)
+            self.assertEqual(first["children"], second["children"])
+            with open(path, "wb") as fh:
+                fh.write(b"changed image")
+            changed = prepare()
+            self.assertEqual(upload.call_count, 2)
+            self.assertEqual(changed["children"][0]["picture"]["attributes"]["id"], "two")
+            prepare("another-document")
+            self.assertEqual(upload.call_count, 3)
+
+
+class OtlSyncSafetyTest(OtlServiceTestCase):
+    def setUp(self):
+        super().setUp()
+        self.md_dir = os.path.join(self.tmp.name, "markdown")
+        os.mkdir(self.md_dir)
+        with open(os.path.join(self.md_dir, "a.md"), "w", encoding="utf-8") as fh:
+            fh.write("# new")
+        self.state_path = os.path.join(self.tmp.name, "state.json")
+        self.folder = {"a.otl": {"id": "fid"}}
+        mock.patch.object(otl_sync, "list_folder", side_effect=lambda *args: self.folder.copy()).start()
+
+    def run_sync(self, *args):
+        argv = ["otl_sync.py", "--md-dir", self.md_dir, "--drive-id", "drive-A",
+                "--parent-id", "0", "--state", self.state_path, "--cli", "/cli", *args]
+        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()):
+            otl_sync.main()
+
+    def seed_state(self, **entry):
+        state = {"version": 1, "target": otl_sync.state_target("drive-A", "0", self.md_dir),
+                 "documents": {"a.otl": {"file_id": "fid", **entry}}}
+        otl_sync.save_state(self.state_path, state)
+
+    def test_default_state_paths_separate_drives_and_sources(self):
+        paths = {otl_sync.default_state_path(otl_sync.state_target(drive, "0", source))
+                 for drive, source in (("A", "/one"), ("B", "/one"), ("A", "/two"))}
+        self.assertEqual(len(paths), 3)
+
+    def test_mismatched_and_legacy_state_cannot_issue_cloud_calls(self):
+        self.seed_state(status="pending")
+        with mock.patch.object(otl_sync, "list_folder") as listing:
+            with self.assertRaises(SystemExit):
+                self.run_sync("--drive-id", "drive-B")
+            listing.assert_not_called()
+        with open(self.state_path, "w", encoding="utf-8") as fh:
+            json.dump({"a.otl": {"file_id": "foreign-document"}}, fh)
+        with self.assertRaises(SystemExit):
+            self.run_sync()
+        self.assertEqual(self.events, [])
+
+    def test_cached_document_absent_from_target_folder_is_never_reused(self):
+        self.seed_state(status="pending")
+        self.folder = {}
+        with self.assertRaises(SystemExit):
+            self.run_sync()
+        self.assertNotIn("delete", self.events)
+
+    def test_pending_document_is_resumed_under_default_skip(self):
+        self.seed_state(status="pending", checkpoint=otl_write.body_fingerprint(self.children))
+        self.run_sync()
+        self.assertIn("create", self.events)
+        with open(self.state_path, encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["documents"]["a.otl"]["status"], "complete")
+
+    def test_completed_or_unowned_existing_document_is_skipped(self):
+        self.run_sync()
+        self.assertEqual(self.events, [])
+        self.seed_state(status="complete")
+        self.run_sync()
+        self.assertEqual(self.events, [])
+
+    def test_partial_chunk_failure_resumes_without_duplicate_blocks(self):
+        self.converted = [self.paragraph(f"new-{i}") for i in range(3)]
+        self.fail_create = 2
+        with self.assertRaises(RuntimeError):
+            self.run_sync("--existing", "replace", "--chunk", "1")
+        self.assertEqual(len(self.children), 1)
+        with open(self.state_path, encoding="utf-8") as fh:
+            entry = json.load(fh)["documents"]["a.otl"]
+        self.assertEqual(entry["status"], "writing")
+        self.assertEqual(entry["checkpoint"], otl_write.body_fingerprint(self.children))
+        self.fail_create = None
+        self.run_sync("--chunk", "1")
+        self.assertEqual(len(self.children), 3)
+        values = [block["paragraph"]["elements"][0]["text"]["attributes"]["content"]
+                  for block in self.children]
+        self.assertEqual(values, ["new-0", "new-1", "new-2"])
+
+    def test_remote_changes_after_interruption_require_reconciliation(self):
+        self.seed_state(status="writing", checkpoint="different checkpoint")
+        with self.assertRaises(SystemExit):
+            self.run_sync()
+        self.assertNotIn("delete", self.events)
+
+    def test_timeout_after_remote_commit_does_not_blindly_replay(self):
+        self.commit_then_timeout = True
+        with self.assertRaises(RuntimeError):
+            self.run_sync("--existing", "replace")
+        self.events.clear()
+        with self.assertRaises(SystemExit):
+            self.run_sync()
+        self.assertNotIn("delete", self.events)
+        self.assertNotIn("create", self.events)
+
+    def test_batch_conversion_failure_keeps_existing_body(self):
+        self.fail_convert = True
+        with self.assertRaises(SystemExit):
+            self.run_sync("--existing", "replace")
+        self.assertEqual(self.children, [self.paragraph("old", "old-id")])
+        self.assertNotIn("delete", self.events)
+
+    def test_batch_dry_run_does_not_write_state_or_cloud_content(self):
+        self.run_sync("--existing", "replace", "--dry-run")
+        self.assertFalse(os.path.exists(self.state_path))
+        self.assertEqual(self.events, [])
+
+    def test_explicit_replace_can_reconcile_an_unknown_checkpoint(self):
+        self.seed_state(status="writing", checkpoint="unknown after timeout")
+        self.run_sync("--existing", "replace")
+        self.assertIn("delete", self.events)
+        self.assertEqual(len(self.children), 1)
+
+    def test_new_document_conversion_failure_can_be_recovered_without_recreation(self):
+        self.folder = {}
+        self.children = [self.paragraph("")]
+
+        def create(*args):
+            self.folder["a.otl"] = {"id": "fid"}
+            return "fid"
+
+        with mock.patch.object(otl_sync, "create_doc", side_effect=create) as create_doc:
+            self.fail_convert = True
+            with self.assertRaises(SystemExit):
+                self.run_sync()
+            self.fail_convert = False
+            self.run_sync()
+            self.assertEqual(create_doc.call_count, 1)
+        self.assertEqual(len(self.children), 1)
+
+    def test_replacement_checkpoint_is_checked_after_conversion(self):
+        self.after_convert = lambda: self.children.append(self.paragraph("concurrent", "other"))
+        with self.assertRaises(SystemExit):
+            self.run_sync("--existing", "replace")
+        self.assertNotIn("delete", self.events)
+
+    def test_atomic_state_save_preserves_previous_file_on_replace_failure(self):
+        self.seed_state(status="pending")
+        with open(self.state_path, "rb") as fh:
+            original = fh.read()
+        with mock.patch.object(os, "replace", side_effect=OSError("disk failure")):
+            with self.assertRaises(OSError):
+                otl_sync.save_state(self.state_path, {"bad": "new state"})
+        with open(self.state_path, "rb") as fh:
+            self.assertEqual(fh.read(), original)
 
 
 if __name__ == "__main__":

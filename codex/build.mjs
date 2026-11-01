@@ -28,6 +28,7 @@ const SCRIPT_NAMES = [
   'file_write.py',
   'otl_fetch.py',
   'otl_write.py',
+  'otl_sync.py',
   'xlsx_edit.py',
   'dbsheet.py',
   'auth.py',

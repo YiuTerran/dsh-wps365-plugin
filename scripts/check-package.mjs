@@ -36,6 +36,7 @@ const REQUIRED = [
   'assets/wps365-docs/scripts/_wps_cli.py',
   'assets/wps365-docs/scripts/otl_fetch.py',
   'assets/wps365-docs/scripts/otl_write.py',
+  'assets/wps365-docs/scripts/otl_sync.py',
   'assets/wps365-docs/scripts/file_fetch.py',
   'assets/wps365-docs/scripts/file_write.py',
   'assets/wps365-docs/scripts/xlsx_edit.py',

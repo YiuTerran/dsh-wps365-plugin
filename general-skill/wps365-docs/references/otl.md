@@ -40,6 +40,21 @@ only for an explicitly intended whole-document replacement, with a full snapshot
 and backup. After timeout, fetch the current blocks before any retry: the server
 may already have inserted content or completed the deletion.
 
+## Preparation and failure safety
+
+The helper converts Markdown and validates local images before deleting any body
+blocks. Local image handling requires Pillow in the selected Python environment.
+It uploads images, checks that the body still matches the preparation baseline,
+then saves a local `otl-backup-*.json` block-tree backup before deletion (the path
+is printed). This does not replace the full export backup. Delete and create are
+still separate, non-atomic requests.
+
+Dry runs do not delete blank paragraphs, upload attachments, or change titles.
+Each write batch is checked against the original block count plus cumulative
+additions, including prepends. Counts alone do not prove content equality: read
+back the affected content. After uncertain outcomes, inspect the live document
+before retrying; do not blindly repeat append or prepend.
+
 ## Targeted block edits
 
 For one paragraph or another narrow edit, inspect the current block tree and use

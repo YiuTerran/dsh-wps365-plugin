@@ -84,8 +84,11 @@ description: 读取或写入 WPS 365 云文档。智能文档（.otl / airpage�
 ## 写入
 
 ```
-# 智能文档：Markdown → blocks/convert → blocks/create（--mode append 追加 / replace 清空后写 / prepend 插到最前；改重要文档前先加 --dry-run 看块结构）
+# 智能文档：Markdown → blocks/convert → blocks/create（--mode append 追加 / replace 清空后写 / prepend 插到最前；改重要文档前先加 --dry-run 看块结构；本地图片自动上传成附件）
 {python} {skillDir}/scripts/otl_write.py --file-id <file_id> --md {tmp}/guide.md --mode replace
+
+# 整个目录的 md 同步成多个文档（建文档 + 传图 + 中断恢复）
+{python} {skillDir}/scripts/otl_sync.py --md-dir <目录> --drive-id <盘> --parent-id <文件夹>
 
 # 普通文件：原地替换（file_id 与分享链接不变，版本历史保留）
 {python} {skillDir}/scripts/file_write.py --drive-id <盘> --file-id <file_id> --file 本地文件

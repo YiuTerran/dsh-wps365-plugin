@@ -52,6 +52,11 @@ read_image("<out>/img/0041_TLOS5VJHACAFC.png")
 
 - `--dry-run`：只转换不写入，打印块结构摘要（**改重要文档前先跑这个**）
 - `--text "<Markdown>"`：不开文件直接给文本
+- `--images auto|off`（默认 auto）：本机图片自动上传成附件并回填 picture 块；`--img-width 86` 控制渲染宽度、`--doc-width`（默认 740px）是正文宽度、`--img-base` 指定相对路径基准（默认 md 所在目录）
+- `--title auto|none|<文本>`（默认 auto）：补文档标题 —— 新建的智能文档**标题块是空的**，只写正文会一直显示「输入标题」；auto 取 front matter 的 `title`，没有就用 md 文件名。标题已有内容时默认不动，`--retitle` 才覆盖
+- `--front-matter drop|keep`（默认 drop）：文首 YAML 会被丢掉，否则它会变成一条水平线加一整行 YAML 文本
+- `--chunk 200`：每批写入块数。8000 块的文档也别调大 —— 服务端偶发整批不落盘，批小一点更好定位
+- **一整个目录的 md**（一份一个文档、图要本地上传）用 `otl_sync.py`：建文档、传图、转块、写入、复核及检查点校验后的中断恢复一次做完
 - 写入前务必先用读取脚本导出备份；单次写入上限 1000 块，超了脚本会自动分批
 - **写入超时 ≠ 写入失败**：`blocks/create` 可能已在服务端提交，只是响应没回来。重试前必须先查块数（`otl_fetch.py` 的节点数，或 blocks 查询的 `data.block["doc"].children` 长度），**否则会把内容写两遍**
 - **代码块语言只有 API 枚举内的才保留**：`bash / go / python / json / sql / yaml` 等 44 种（见规范的 `airpage_block_code_block_attrs_lang`）。写 `powershell` 这类枚举外的语言会被**静默降级成纯文本**，不报错
@@ -69,6 +74,18 @@ read_image("<out>/img/0041_TLOS5VJHACAFC.png")
 返回关键字段：`drive_id`、`file_id`、`created_by`（分享者）、`scope`（如 `anyone`）、`status`、`role_id`。拿到 `file_id` 后**直接**用脚本导出即可 —— 实测外部用户（`company_id: 0`）分享的 `anyone` 范围文档，用本企业 delegated token 可以直接读取，**不需要"接收文件"这类前置动作**。
 
 注意：该接口的权限域是 `kso.file_link.readwrite`，CLI 没有把它包成 curated 命令，必须走 `api get`。
+
+## 图片：本地图片怎么进文档
+
+`blocks/convert` 认得 `<img src="x.png">` 和 `![](x.png)`，但产出的 picture 块 `id` 是**空串**、尺寸是 300×300 占位；空 id 直接写进去会被 400 拒（只报 `invalid DocChildren.Children[i]`，看不出真正原因）。`otl_write.py --images auto` 已封装整条链路：按图片在 Markdown 里的**出现顺序**（与 convert 出的 picture 块一一对应，含表格单元格里的图）上传、回填 id 与真实宽高。远程 `http(s)` 图片没有本地字节，会被替换成一行说明而不是留空 id。
+
+附件上传三步（**不要**用 `/v7/coop/airpage/{file_id}/attachments/upload`，服务端回 `500000004 method AttachmentsUpload not implemented`）：
+
+1. `POST /v7/coop/files/{file_id}/attachments/upload/address` `{name,size,content_type,md5}` → `upload_id` + `request{url,method,headers}` + `send_back_params`
+2. `PUT` 字节到 `request.url`（带上 `request.headers`）
+3. `POST .../attachments/upload/complete` `{upload_id, params{key, etag}}` → `attachment_id`（13 位，直接就是 picture 块的 `id`）
+
+**`send_back_params` 的值是 `header.<响应头名>`**，必须按响应里给的名字去 PUT 响应头取：`ks3_compatible` 后端给的是 `header.newfilename`，obs 后端给的是 `header.x-obs-save-key`。写死头名会让 complete 报 `params is empty, must contain key and etag`。
 
 ## 硬约束（踩过的坑）
 
@@ -89,3 +106,19 @@ read_image("<out>/img/0041_TLOS5VJHACAFC.png")
 15. **行内样式要按"区间"还原**：转换器会把一段加粗拆成多个元素，其中夹着代码片段。逐元素包 `**` 会产出 `**应用 ID → ****`client_id`**` 这种破碎标记；正确做法是先合并相邻同样式片段，再对加粗区间统一切换开闭状态，让代码片段嵌套在加粗内。
 16. **`blocks/update` 的正文不在 `elements`**：字段是 `update_elements`，且它是**对象不是数组**，要按块类型再嵌一层 —— 段落是 `{"update_elements": {"paragraph_elements": {"elements": [...]}}}`。传 `elements` 报 `400000002 proto: syntax error … unexpected token [`，传成数组同样报错。
 17. **`blocks/create` 的 `index` 是插入位置，不是追加锚点**（详见 `references/concurrency.md`）：并发新增不丢数据但顺序会颠倒。
+18. **单表行数上限 100**（`table.rows` maxItems=100），超了写入直接 400。标准的字段清单表常有几百行，只能拆成多张并重复表头 —— `otl_write.py` 自动做（实测 430 行的表拆成 5 张）。
+19. **picture 块 `id` 最长 32 字符**，而云盘 `file_id` 是 33 位，所以**不能**拿盘内文件 id 当图片 id；必须走附件上传拿 `attachment_id`。
+20. **千块级写入的 JSON 有几百 KB，塞进 argv 会 `OSError: [Errno 7] Argument list too long`**（命令连 CLI 都没启动）。改用 `api post --file body.json`，脚本已按大小自动切换。
+21. **新建的空文档自带一个空段落**，它占着 index 0；脚本在转换、图片校验和上传完成后才清理它。`--dry-run` 不修改正文、标题或附件。服务端在写入后也会在末尾留一个空段落，属正常（append 时脚本会插在它前面）。
+22. **"返回成功"≠ 已落盘**：实测一整批 `blocks/create` 返回 `code 0` 之后整批消失（块数从 931 掉回 801）。脚本每批按「原有块数 + 累计新增块数」复核，prepend 也不能用旧块掩盖丢写；不一致时以非零退出。块数一致不证明文本一致，仍须回读内容；失败后不要盲目重试 append/prepend。
+23. **删目录不能用单文件 delete**：对文件夹回 `403008042 不支持的文件类型`；要用 `POST /v7/drives/{drive_id}/files/batch_delete` `{"file_ids":[...]}`（返回 task_id，异步生效）。
+24. **Front matter 要自己摘掉**：`---` 包起来的 YAML 直接喂 convert 会变成一条水平线加一整行 YAML 文本。`otl_sync.py` 会摘掉并改写成文首一行「来源/页数/转换日期」。
+25. **新建的智能文档标题块（`block_id: "title"`）是空的**，文件名叫什么不影响它 —— 只写正文，顶部会一直显示「输入标题」。写标题要用 `blocks/update` 的 `{"block_id":"title","update_elements":{"title_elements":{"elements":[...]}}}`（标题的键是 `title_elements`，不是 `paragraph_elements`）。`otl_write.py` / `otl_sync.py` 默认会补，已有标题则保留不动。
+
+## 覆盖与中断恢复
+
+- 转换、图片校验与上传完成后，先核对正文基线；删除前保存本地 `otl-backup-*.json` 块树并打印路径。它不能替代完整导出备份，删除与创建仍非原子操作。
+- 同步状态绑定云盘、目标文件夹与源目录，默认文件名包含三者摘要。旧版无目标信息的状态会被拒绝；保留旧文件并指定新的 `--state`，不要套用旧 ID。
+- 默认 skip 跳过已完成或非本任务文档；本任务的未完成文档仅在正文匹配检查点时恢复。恢复重建整份文档，不是逐块续写；删除后与每批写入后保存检查点。
+- 超时、文档移出目录或并发修改导致状态不明时停止。先回读核对，确认允许覆盖后才用 `--existing replace`。
+- 图片缓存核对目标文档和本地 SHA-256，内容变化后重新上传。状态原子保存不等于互斥，不要多进程共用状态文件。

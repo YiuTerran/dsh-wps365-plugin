@@ -18,6 +18,7 @@ const SCRIPT_NAMES = [
   'file_write.py',
   'otl_fetch.py',
   'otl_write.py',
+  'otl_sync.py',
   'xlsx_edit.py',
   'dbsheet.py',
   'auth.py',
@@ -61,11 +62,14 @@ const SHARED_DOCUMENTS = [
     codex: join(SOURCE_DIR, 'skills', 'wps365-docs', 'references', 'otl.md'),
     sections: {
       '## 硬约束（踩过的坑）': {
-        shared: [1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13, 14, 15, 16, 17],
+        shared: [1, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13, 14, 15, 16, 17,
+          18, 19, 20, 21, 22, 23, 24, 25],
         // 7 and 9 are phrased for Codex: it passes --cli explicitly and talks
         // about visual context rather than the DSH image pipeline.
         adapted: [7, 9],
       },
+      // 图片上传的三步与 send_back_params 的头名差异，两侧必须说同一件事。
+      '## 图片：本地图片怎么进文档': { shared: [], adapted: [1, 2, 3] },
     },
     wholeSections: ['## 为什么有这条专用路线'],
   },
