@@ -51,18 +51,22 @@ test('rendered skill body stays inside the 8192-code-point pruner budget', () =>
   // also carries the platform, the temp directory, and the deferred (longest)
   // python line. Measuring only `cli` understates the rendered body by ~150
   // characters and is how the 0.2.6 additions nearly crossed the budget.
-  const hint = buildRuntimeHint({
-    skillDir: ASSET_ROOT,
-    cli: '/usr/local/bin/wps365-cli',
-    cliExists: true,
-    platform: 'darwin',
-    tmpDir: '/tmp/dsh-session-tmp-directory-0123456789',
-  })
-  const rendered = body + hint
-  assert.ok(
-    [...rendered].length < 8192,
-    `rendered body is ${[...rendered].length} code points; the standard preset prunes tool results over 8192`,
-  )
+  // Fixed long paths catch regressions hidden by a short local checkout path.
+  const fixtures = [
+    { platform: 'darwin', skillDir: ASSET_ROOT },
+    { platform: 'linux', skillDir: '/home/runner/work/dsh-wps365-plugin/dsh-wps365-plugin/assets/wps365-docs/' },
+    { platform: 'win32', skillDir: `C:\\Users\\maintainer\\AppData\\Local\\${'long-install-path-'.repeat(6)}\\assets\\wps365-docs` },
+  ]
+  for (const fixture of fixtures) {
+    const hint = buildRuntimeHint({
+      ...fixture,
+      cli: fixture.platform === 'win32' ? 'C:\\Users\\maintainer\\.local\\bin\\wps365-cli.exe' : '/usr/local/bin/wps365-cli',
+      cliExists: true,
+      tmpDir: '/tmp/dsh-session-tmp-directory-0123456789',
+    })
+    const length = [...body + hint].length
+    assert.ok(length < 8192, `${fixture.platform} rendered body is ${length} code points; budget is 8192`)
+  }
 })
 
 test('the body keeps the mandatory conflict-check rule and points at the references', () => {

@@ -25,11 +25,11 @@ description: 读取或写入 WPS 365 云文档。智能文档（.otl / airpage�
 - 不要自行设置 `WPS365_NO_AUTO_LOGIN=1` / `WPS365_AUTO_LOGIN=0`；用户已配置就遵守：它只禁用登录弹窗，**不禁用 refresh**。报告时区分“已尝试刷新”“刷新后验证成功”“原请求已重试”。
 - 不要把 `WPS365_ACCESS_TOKEN` 写进环境变量：它跳过存储和自动刷新，2 小时后必然失效。`WPS365_AUTH=app` 的 client_credentials 适合无人值守，但不能替代用户态文档权限。
 
-本文件只放**必须立刻知道**的规则与命令骨架，细节按需读 `{skillDir}/references/`：
+命令与硬规则见下文，细节按需读 `{skillDir}/references/`：
 
 | 需要什么 | 读哪个文件 |
 |---|---|
-| 智能文档 `.otl` 的读取、写入、分享链接、17 条硬约束 | `references/otl.md` |
+| 智能文档 `.otl` 的读写、分享链接与硬约束 | `references/otl.md` |
 | 普通文件 `.docx` / `.xlsx` / `.pptx` 的下载 → 改 → 传回 | `references/office-files.md` |
 | 多维表 `.dbt` 的记录读写、快照比对、附件与 15 条硬约束 | `references/dbsheet.md` |
 | 写入前的并发比对、块级/整文件哈希、冲突判定与实测语义 | `references/concurrency.md` |
@@ -42,7 +42,7 @@ description: 读取或写入 WPS 365 云文档。智能文档（.otl / airpage�
 | **普通文件 `.docx` / `.xlsx` / `.pptx`** | `file_fetch.py` | `file_write.py` 三步原地传回 |
 | **多维表 `.dbt`** | `dbsheet.py schema/list/get` | `dbsheet.py create/update/delete` |
 
-三类写入语义根本不同：`.otl` 有块级 API，可以逐段增删改；`.docx` / `.xlsx` 没有（`.xlsx` 的单元格接口连字面值都写不了，只能写公式），所以后者的常规姿势是**下载到本地改、再整文件传回**；`.dbt` 是数据库，只能按记录读写，**不能抽正文、也不能当文件夹列子文件**。
+`.otl` 可按块增删改；普通文件**下载到本地改、再整文件传回**；`.dbt` 按记录读写，不能抽正文或当文件夹列子文件。
 
 ⚠️ 例外必须说清：**有服务端内容模型的「在线表格」不采纳字节覆盖** —— 版本号与字节都会更新，读回却仍是旧值。`xlsx_edit.py` 上传后会读回 `--set` 写过的字面值单元格，不一致就**以退出码 1 明确失败**；真要改在线表格的内容，走 `references/office-files.md` 的单元格/公式接口，或让用户在线手动粘贴。
 
@@ -84,7 +84,7 @@ description: 读取或写入 WPS 365 云文档。智能文档（.otl / airpage�
 ## 写入
 
 ```
-# 智能文档：Markdown → blocks/convert → blocks/create（--mode append 追加 / replace 清空后写 / prepend 插到最前；改重要文档前先加 --dry-run 看块结构；本地图片自动上传成附件）
+# 智能文档：append 追加 / replace 覆盖 / prepend 前插；先 --dry-run，本地图片自动上传
 {python} {skillDir}/scripts/otl_write.py --file-id <file_id> --md {tmp}/guide.md --mode replace
 
 # 整个目录的 md 同步成多个文档（建文档 + 传图 + 中断恢复）
@@ -108,9 +108,9 @@ description: 读取或写入 WPS 365 云文档。智能文档（.otl / airpage�
 3. **`--mode replace` 是先删后插**，两步之间失败会让文档暂时变空 —— 这正是备份必须存在的原因
 4. **多维表写入后必须读回**：选项/Link 非法值可能被接口**静默清空**，脚本会逐字段比对本 地期望值与读回值，不一致以退出码 1 失败
 
-其他要点：单次写入上限 1000 块（脚本自动分批）；代码块语言只有 API 枚举内的才保留（写 `powershell` 会被**静默降级成纯文本**）；不要手拼块 JSON，转换器负责标题/表格/加粗/代码/列表；`.xlsx` 的接口写入后二进制**异步落盘**，写完不要立刻下载校验。
+单次最多 1000 块，脚本自动分批；不要手拼块 JSON。枚举外代码语言（如 `powershell`）会静默降为纯文本。`.xlsx` 接口写入后二进制异步落盘，不要立刻下载校验。
 
-多维表另有几条只在这里强调：`record list` 默认只回 1 条，脚本固定 100 并翻页；`fields_value` 是 JSON **字符串**；Link 写入用记录 ID、过滤用显示名；Form 视图不承载记录。附件用 `dbsheet.py attachments --out <目录>` 下载，`--images-only` 只看图，服务器可能把图片转码，脚本按文件头改扩展名。完整命令与 15 条硬约束见 `references/dbsheet.md`。
+多维表：脚本按 100 条分页；`fields_value` 是 JSON 字符串；Link 写入用 ID、过滤用显示名。附件用 `dbsheet.py attachments --out <目录>` 下载，`--images-only` 只看图；转码和其他约束见 `references/dbsheet.md`。
 
 ## 编辑内容本身
 
